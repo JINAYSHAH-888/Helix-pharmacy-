@@ -1,0 +1,54 @@
+@meta
+  v: 1
+  route: /
+  generated: 2026-09-09T00:00:00+05:30
+  ttl: 1d
+
+@intent
+  purpose: Make the supplied distributed pharmacy RMI system inspectable through a scroll-led control room.
+  audience: project-reviewer, distributed-systems-learner, pharma-operations-partner
+  capability: observe, search, inspect
+
+@state
+  page_state: ready
+  opening_sequence: scroll-scrubbed
+  opening_frames: 100
+  data_mode: read-only + simulated fault lab
+  gateway: java-http-api
+  collections: branches, medicines, prescriptions, inventory, transactions
+  fault_tolerance: primary-backup simulation, ephemeral
+  reduced_motion: supported
+  language: en
+
+@actions
+  - id: skip_opening
+    method: GET
+    href: /#overview
+  - id: view_network
+    method: GET
+    href: /#network
+  - id: inspect_data
+    method: GET
+    href: /#explorer
+  - id: inspect_protocol
+    method: GET
+    href: /#protocol
+  - id: open_fault_lab
+    method: GET
+    href: /#fault-tolerance
+  - id: simulate_primary_failure
+    method: POST
+    href: /api/fault-tolerance/action?action=fail-primary
+  - id: recover_primary
+    method: POST
+    href: /api/fault-tolerance/action?action=recover-primary
+
+@context
+  > A monochrome distributed-pharmacy control room. The first scroll scene is a supplied 100-frame capsule opening sequence controlled by scroll position.
+  > The Java gateway projects the existing HardcodedData dataset and probes six RMI registries. The pharmacy data remains read-only; the fault lab exposes only an ephemeral primary-backup simulation with failover and replay evidence.
+
+@nav
+  self: /index.agent
+  parents: [/]
+  peers: [/index.html]
+  drilldown: /#explorer
