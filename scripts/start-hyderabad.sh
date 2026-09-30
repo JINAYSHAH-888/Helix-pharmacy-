@@ -2,4 +2,4 @@
 set -e
 cd "$(dirname "$0")/.."
 ./scripts/compile.sh
-java -cp out com.pharmacy.rmi.server.HyderabadServer
+java -cp "out:lib/postgresql-42.7.4.jar" com.pharmacy.rmi.server.HyderabadServer

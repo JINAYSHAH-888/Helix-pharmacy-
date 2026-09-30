@@ -1,0 +1,115 @@
+/* Glass galaxy buttons — adapted from ThreeUI GlassAiButton (see DESIGN.md → Amendment).
+   Unlayered on purpose: it wins over the control room's @layer components button styles. */
+.glass-btn {
+  --gb-h: 44px;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: var(--gb-h);
+  padding: 0 20px 0 6px;
+  color: var(--glass-text) !important;
+  background: linear-gradient(180deg, var(--glass-top), var(--glass-bottom)) !important;
+  border: 1px solid var(--glass-rim) !important;
+  border-radius: 999px !important;
+  box-shadow:
+    inset 0 1px 0 var(--glass-sheen),
+    inset 0 -2px 6px var(--glass-rim-soft),
+    inset 0 0 0 3px var(--glass-rim-soft),
+    0 10px 28px -12px var(--glass-glow);
+  backdrop-filter: blur(18px) saturate(0) brightness(1.05);
+  -webkit-backdrop-filter: blur(18px) saturate(0) brightness(1.05);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: var(--label-size);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-decoration: none !important;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: visible;
+  transition: transform var(--d-fast) var(--e-std), box-shadow var(--d-base) var(--e-std), filter var(--d-base) var(--e-std);
+}
+/* curved specular sheen across the lower half, like the source's glass slab */
+.glass-btn::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 12%; right: 10%; top: 54%; height: 34%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 0%, var(--glass-sheen), transparent 70%);
+  opacity: .55;
+  pointer-events: none;
+}
+.glass-btn:hover { filter: brightness(1.12); box-shadow: inset 0 1px 0 var(--glass-sheen), inset 0 -2px 6px var(--glass-rim-soft), inset 0 0 0 3px var(--glass-rim-soft), 0 12px 34px -10px var(--glass-glow); }
+.glass-btn:active { transform: scale(.97); }
+.glass-btn:focus-visible { outline: 2px solid var(--glass-rim) !important; outline-offset: 4px; }
+.glass-btn[aria-pressed="true"], .glass-btn.is-active { filter: brightness(1.2); border-color: var(--glass-text) !important; }
+.glass-btn:disabled, .glass-btn[aria-disabled="true"] { filter: saturate(.3) brightness(.9); opacity: .55; cursor: not-allowed; }
+.glass-btn:disabled:active { transform: none; }
+.glass-btn[aria-busy="true"] .gb-orb::before { animation-duration: 1.2s; }
+.glass-btn > span[aria-hidden="true"]:not(.gb-orb) { font-size: 1.25em; }
+
+/* the galaxy orb */
+.gb-orb {
+  position: relative;
+  flex: none;
+  width: calc(var(--gb-h) - 10px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 32% 26%, var(--orb-spec) 0 5%, transparent 22%),
+    radial-gradient(circle at 50% 50%, var(--orb-core) 0, var(--orb-mid) 38%, var(--orb-deep) 70%, var(--orb-edge) 100%);
+  box-shadow: 0 0 0 1px var(--glass-rim), 0 0 12px 1px var(--glass-glow), inset 0 -3px 6px var(--orb-edge);
+}
+/* two spiral arms of stars (drawn once on a canvas by glass.js → --gb-galaxy), spinning */
+.gb-orb::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  background: var(--gb-galaxy, none) center / 100% 100% no-repeat;
+  -webkit-mask: radial-gradient(circle, #000 0 58%, transparent 74%);
+          mask: radial-gradient(circle, #000 0 58%, transparent 74%);
+  animation: gb-spin 14s linear infinite;
+}
+/* bright galactic core + glass cap highlight */
+.gb-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, var(--orb-spec) 0 6%, transparent 18%),
+    radial-gradient(ellipse at 40% 18%, var(--glass-sheen), transparent 38%);
+  pointer-events: none;
+}
+@keyframes gb-spin { to { rotate: 1turn; } }
+.glass-btn:hover .gb-orb::before { animation-duration: 5s; }
+
+/* sizes */
+.glass-btn--sm { --gb-h: 34px; padding-right: 14px; gap: 8px; }
+.glass-btn--lg { --gb-h: 56px; padding-right: 26px; gap: 12px; font-size: var(--step--1); }
+.glass-btn--icon { padding: 0; width: var(--gb-h); min-width: var(--gb-h); justify-content: center; }
+
+/* the one shared burst canvas */
+.glass-burst-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 2147483000; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-orb::before { animation: none; }
+  .glass-btn { transition: none; }
+}
+@media (forced-colors: active) {
+  .glass-btn { forced-color-adjust: none; border-color: ButtonText !important; }
+}
+
+/* clear-acrylic dome: bright top reflection band + dark lower edge, monochrome */
+.glass-btn::before {
+  content: ""; position: absolute; inset: 1px 6% 52% 6%; border-radius: 999px; pointer-events: none;
+  background: linear-gradient(to bottom, var(--glass-sheen), transparent);
+  opacity: .55;
+}

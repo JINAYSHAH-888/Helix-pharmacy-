@@ -9,7 +9,7 @@ pids=()
 start_node() {
   local name="$1"
   local class_name="$2"
-  java -cp out "$class_name" > ".runtime-logs/${name}.log" 2>&1 &
+  java -cp "out:lib/postgresql-42.7.4.jar" "$class_name" > ".runtime-logs/${name}.log" 2>&1 &
   pids+=("$!")
 }
 

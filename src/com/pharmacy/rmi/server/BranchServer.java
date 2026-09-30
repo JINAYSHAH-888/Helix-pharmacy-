@@ -10,15 +10,16 @@ import java.util.concurrent.CountDownLatch;
 public final class BranchServer {
     private BranchServer() {}
 
-    public static void start(String name, int port, String branchId, String branchCode) throws Exception {
+    public static void start(String name, int port, String branchCode) throws Exception {
         Registry registry = LocateRegistry.createRegistry(port);
-        registry.rebind("PharmacyNode", new PharmacyNodeImpl(name, Set.of(branchId)));
+        registry.rebind("PharmacyNode", new PharmacyNodeImpl(name, Set.of(branchCode)));
         Console.banner(Console.GREEN, name.toUpperCase() + " SERVER  |  PharmacyNode",
                 "Node ID   : " + nodeId(name),
                 "Port      : " + port,
                 "Bindings  : PharmacyNode",
                 "Branches  : " + branchCode,
                 "Bully     : participates in six-node election cluster",
+                "Data      : PostgreSQL (" + PharmacyData.describeSource() + ")",
                 "Status    : " + Console.GREEN + "READY - waiting for requests" + Console.RESET);
         new CountDownLatch(1).await();
     }

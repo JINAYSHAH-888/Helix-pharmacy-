@@ -1,0 +1,107 @@
+/* Semantic layer — the ONLY names components use.
+   Anchors preserve the values shipped before the OKLCH migration (see DESIGN.md → Color).
+   One theme: warm paper with ink bands. */
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --paper: oklch(96.9% 0.0066 106.5);        /* was #F5F5F0 */
+  --paper-deep: oklch(93.2% 0.0093 106.6);   /* was #E9E9E2 = --n-4 */
+  --panel: oklch(94.7% 0.0080 106.6);        /* was #EEEEE8 */
+  --ink: oklch(19.5% 0.0059 106.9);          /* was #151512 */
+  --ink-raised: oklch(23% 0.0070 107);       /* hover surface on ink */
+  --ink-press: oklch(32% 0.0100 107);        /* pressed primary on paper */
+  --dark: var(--ink);
+
+  /* lines */
+  --line: oklch(86.4% 0.0122 106.7);         /* was #D3D3CA */
+  --line-strong: var(--n-9);                 /* UI-carrying borders, 3.19:1 */
+  --dark-line: oklch(35.8% 0.0118 107);      /* was #3D3D36 */
+
+  /* text */
+  --text: var(--ink);
+  --muted: oklch(49.5% 0.0105 106.8);        /* was #6D6D66 — darkened, 5.03:1 on paper-deep */
+  --dark-muted: oklch(80% 0.0120 107);       /* was #9C9C93 — lightened, 9.78:1 on ink */
+  --disabled: var(--n-9);
+
+  /* status on paper (step 11) and on ink (dark-ramp step 11) */
+  --good: var(--good-11);
+  --warn: var(--warn-11);
+  --good-on-dark: var(--good-on-dark-11);
+  --warn-on-dark: var(--warn-on-dark-11);
+  --good-fill: var(--good-9);
+  --warn-fill: var(--warn-9);
+
+  /* RESERVED — prescription 017 tamper state only */
+  --danger: var(--danger-11);
+  --danger-fill: var(--danger-9);
+  --danger-on-dark: var(--danger-on-dark-11);
+  --danger-wash: var(--danger-3);
+
+  /* focus */
+  --focus: var(--ink);
+  --focus-on-dark: var(--paper);
+
+  /* overlays */
+  --scrim: oklch(19.5% 0.0059 106.9 / 0.56);
+  --header-bg: oklch(96.9% 0.0066 106.5 / 0.94);
+
+  /* families */
+  --mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Manrope", ui-sans-serif, sans-serif;
+  --serif: "Playfair Display", Georgia, serif;
+
+  /* space */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px;
+  --s-7: 48px; --s-8: 64px; --s-9: 96px; --s-10: 128px; --s-11: 192px;
+
+  /* shape */
+  --r-0: 0; --r-1: 2px; --r-2: 4px;
+  --hair: 1px solid var(--line);
+  --hair-dark: 1px solid var(--dark-line);
+  --tick: 8px;
+
+  /* layout */
+  --page-max: 1370px;
+  --gutter: 56px;
+  --header-h: 76px;
+  --target: 40px;       /* primary control height */
+  --target-min: 24px;   /* WCAG 2.5.8 floor */
+
+  /* motion — exactly four easings */
+  --d-fast: 120ms; --d-base: 180ms; --d-slow: 480ms; --d-cine: 900ms;
+  --e-std: cubic-bezier(.4,0,.2,1);
+  --e-enter: cubic-bezier(.16,1,.3,1);
+  --e-exit: cubic-bezier(.7,0,.84,0);
+  --e-move: cubic-bezier(.65,0,.35,1);
+  --stagger-rows: .04s; --stagger-cards: .06s;
+
+  /* z */
+  --z-base: 0; --z-scene: 1; --z-hud: 2; --z-sticky: 100; --z-overlay: 200; --z-grain: 300;
+
+  /* label treatment */
+  --label-size: var(--step--2);
+  --label-track: .08em;
+}
+
+@media (max-width: 900px) { :root { --gutter: 28px; } }
+@media (max-width: 700px) { :root { --gutter: 20px; --header-h: 68px; } }
+
+/* Glass galaxy buttons (DESIGN.md → Amendment). Hue 262. */
+:root {
+  --glass-top: oklch(100% 0 0 / 0.30);
+  --glass-bottom: oklch(18% 0 0 / 0.62);
+  --glass-rim: oklch(100% 0 0 / 0.85);
+  --glass-rim-soft: oklch(100% 0 0 / 0.30);
+  --glass-sheen: oklch(100% 0 0 / 0.70);
+  --glass-glow: oklch(100% 0 0 / 0.35);
+  --glass-text: oklch(100% 0 0);
+  --orb-core: oklch(100% 0 0);
+  --orb-mid: oklch(22% 0 0);
+  --orb-deep: oklch(12% 0 0);
+  --orb-edge: oklch(6% 0 0);
+  --orb-arm: oklch(96% 0 0 / 0.9);
+  --orb-spec: oklch(100% 0 0);
+  --spark: oklch(100% 0 0);
+  --spark-ring: oklch(70% 0 0);
+}

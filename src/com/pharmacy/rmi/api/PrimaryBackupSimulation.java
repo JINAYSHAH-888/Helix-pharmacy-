@@ -11,7 +11,7 @@ import java.util.Locale;
 /**
  * Small, explicit primary-backup failure-tolerance lab for the browser UI.
  *
- * This is intentionally separate from HardcodedData and the supplied RMI
+ * This is intentionally separate from the PostgreSQL pharmacy data (PharmacyData) and the supplied RMI
  * nodes. It gives the operator a deterministic way to observe failover,
  * degraded writes, rejoin, and replay without mutating pharmacy records.
  * State lives only in the web-gateway process and resets on restart.

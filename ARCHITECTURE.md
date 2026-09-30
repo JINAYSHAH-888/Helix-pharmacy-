@@ -6,7 +6,7 @@
 - **Durable mutations:** none. The supplied RMI application remains the only runtime source of the pharmacy dataset; the fault lab stores ephemeral simulation state in the gateway process only.
 - **Explicit non-goals:** no pharmacy-record writes, no silent dispensing action, no fake PostgreSQL connection, no claim that the lab is a regulated production replication system or a full consensus implementation.
 - **Deployment shape:** machine-shaped read model and observability adapter.
-- **Why this shape:** every browser response is a deterministic projection of `HardcodedData` plus live local RMI registry probes. There is no model-selected transition or autonomous worker.
+- **Why this shape:** every browser response is a projection of the PostgreSQL tables (read via `PharmacyData`, JDBC, 2 s cache) plus live local RMI registry probes. There is no model-selected transition or autonomous worker.
 
 ## 2. Trust roles
 
@@ -18,7 +18,7 @@
 | Result verifier | Browser gateway + independent runtime checks | Verifies response shape, reachability, and source | Worker |
 | Operator | Human running the local project | Starts/stops nodes, runs the bounded fault lab, and inspects output | Automated gateway |
 
-The frontend authorizes only four local simulation actions: append a synthetic event, fail the configured primary, recover it, and reset the lab. These actions cannot reach `HardcodedData` or the pharmacy RMI mutation surface. Any future pharmacy write adapter must introduce explicit auth, an independent verifier, and an audit sink before adding controls to the UI.
+The frontend authorizes only four local simulation actions: append a synthetic event, fail the configured primary, recover it, and reset the lab. These actions cannot write to PostgreSQL or the pharmacy RMI mutation surface. Any future pharmacy write adapter must introduce explicit auth, an independent verifier, and an audit sink before adding controls to the UI.
 
 ## 3. State machine
 
@@ -38,8 +38,8 @@ The frontend authorizes only four local simulation actions: append a synthetic e
 | HTTP gateway | JSON `GET /api/*` | `PharmacyWebServer` using JDK `HttpServer` | Returns controlled error; frontend remains usable as an empty shell |
 | Fault lab | JSON `GET /api/fault-tolerance` + bounded `POST /api/fault-tolerance/action` | `PrimaryBackupSimulation` in the gateway process | Rejects unknown actions; state is ephemeral and isolated from pharmacy records |
 | Static view | Same-origin asset delivery | Gateway serves project root safely | 404/403 for missing or escaped paths |
-| Ground-truth view | Overview, network, collections, search | `ApiService` projections of `HardcodedData` and socket probes | Declared status remains visible beside effective reachability |
-| Persistence | Reference only | `sql/reference/pharmacy_schema.sql` | No database connection is claimed or opened |
+| Ground-truth view | Overview, network, collections, search | `ApiService` projections of the PostgreSQL tables and socket probes | Declared status remains visible beside effective reachability |
+| Persistence | PostgreSQL (`helixis_pharmacy`) via JDBC | `PharmacyData` + `sql/pharmacy_schema.sql` | Serves the last good read through a brief outage; fails with a clear message if the database was never reachable |
 
 ## 5. Governance
 

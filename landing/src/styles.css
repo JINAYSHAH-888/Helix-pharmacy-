@@ -1,0 +1,130 @@
+/* Helixis landing — every value from ../tokens (see landing/DESIGN.md).
+   The page never visibly scrolls: .stage is fixed, .track gives native scroll its length. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--paper); scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: var(--step-0); line-height: var(--lh-0); overflow-x: clip; -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.mono { font-family: var(--mono); letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+
+.skip-link { position: fixed; left: -9999px; z-index: 50; }
+.skip-link:focus { left: var(--s-3); top: var(--s-3); padding: var(--s-3); background: var(--paper); border: 1px solid var(--ink); }
+
+/* ── stage layers ─────────────────────────────────────────────────────────── */
+.track { height: 900vh; }
+.stage { position: fixed; inset: 0; overflow: hidden; }
+.backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.capsule-canvas { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+.capsule-fallback { display: none; }
+.no-webgl .capsule-fallback { display: block; position: absolute; right: 12%; top: 50%; z-index: 1; width: min(18vw, 200px); translate: 0 -50%; rotate: 28deg; }
+.cf-ink { fill: var(--ink); }
+.cf-paper { fill: var(--paper); stroke: var(--line); }
+
+.scenes { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.scene { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: calc(var(--header-h) + var(--s-5)) var(--gutter) var(--s-8); pointer-events: none; }
+.scene > * { pointer-events: auto; max-width: min(40rem, 44vw); }
+.node-labels { position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: 0; }
+
+/* ── masked line reveals (driven by the scroll timeline) ──────────────────── */
+.lines { margin: 0; }
+.line { display: block; overflow: hidden; padding-bottom: .06em; }
+.line-inner { display: block; }
+
+h1, h2 { margin: 0; font-size: var(--step-10); line-height: .92; letter-spacing: -.06em; font-weight: 600; }
+h1 em, h2 em { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -.035em; }
+.eyebrow { margin: 0 0 var(--s-5); color: var(--muted); font-size: var(--label-size); letter-spacing: var(--label-track); }
+.eyebrow::before { content: ""; display: inline-block; width: 31px; height: 1px; margin: 0 var(--s-3) 3px 0; background: currentColor; }
+.lead { margin: var(--s-5) 0 0; max-width: 42ch; color: var(--muted); font-size: var(--step-1); line-height: 1.5; text-wrap: pretty; }
+
+/* ── 01 capsule ───────────────────────────────────────────────────────────── */
+/* Hero entrance in CSS (compositor thread) — fill-mode `backwards` so once it ends,
+   GSAP's inline transforms/opacity own these elements for the scroll exit. */
+.scene-capsule .line-inner { animation: hero-rise var(--d-cine) var(--e-enter) backwards; }
+.scene-capsule .line:nth-child(2) .line-inner { animation-delay: 80ms; }
+.scene-capsule .reveal { animation: hero-fade var(--d-slow) var(--e-enter) backwards; animation-delay: 220ms; }
+.scene-capsule .reveal ~ .reveal { animation-delay: 300ms; }
+@keyframes hero-rise { from { transform: translateY(110%); } }
+@keyframes hero-fade { from { opacity: 0; transform: translateY(24px); } }
+.readout { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; margin: var(--s-6) 0 0; border-top: var(--hair); border-left: var(--hair); background: color-mix(in oklch, var(--paper) 80%, transparent); }
+.readout div { padding: var(--s-2) var(--s-4) var(--s-2) var(--s-3); border-right: var(--hair); border-bottom: var(--hair); }
+.readout dt { color: var(--muted); font-size: var(--label-size); letter-spacing: var(--label-track); }
+.readout dd { margin: var(--s-1) 0 0; font-size: var(--step--1); }
+.scroll-cue { display: inline-flex; align-items: center; gap: var(--s-2); margin: var(--s-7) 0 0; color: var(--muted); font-size: var(--label-size); letter-spacing: var(--label-track); }
+.scroll-cue i { width: 1px; height: 28px; background: var(--ink); transform-origin: top; animation: cue 1.6s var(--e-move) infinite; }
+@keyframes cue { 0% { scale: 1 0; } 50% { scale: 1 1; } 100% { scale: 1 0; transform-origin: bottom; } }
+
+/* ── 02 overview ──────────────────────────────────────────────────────────── */
+.scene-overview { justify-content: center; }
+.scene-overview .overview-head { max-width: min(36rem, 42vw); }
+.scene-overview .lead { font-size: var(--step-0); }
+
+/* ── 03 burst ─────────────────────────────────────────────────────────────── */
+.facts { display: grid; gap: var(--s-2); margin: var(--s-5) 0 0; padding: 0; list-style: none; font-size: var(--step--1); }
+.facts li { display: flex; gap: var(--s-3); align-items: baseline; padding: var(--s-2) 0; border-bottom: 1px dashed var(--line); }
+.facts b { min-width: 3ch; font-weight: 500; font-size: var(--step-2); letter-spacing: -.02em; }
+/* the loop's svg is 1200×520 with the ribbon on its centre line — pull it down so the ribbon runs along the bottom edge */
+.scene-burst .burst-loop { position: absolute; left: 0; right: 0; bottom: calc(-0.215 * 100vw + 2vh); max-width: none; pointer-events: none; opacity: .92; }
+
+/* ── 04 enter ─────────────────────────────────────────────────────────────── */
+.probe { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); margin: var(--s-6) 0 0; padding: var(--s-3) var(--s-4); border: var(--hair); border-radius: var(--r-1); background: color-mix(in oklch, var(--paper) 85%, transparent); width: fit-content; }
+.probe-detail { color: var(--muted); font-size: var(--label-size); letter-spacing: .04em; }
+.cta { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-6) 0 0; }
+/* buttons: React Bits SpecularButton (dark ink, specular rim) — see components/reactbits/SpecularButton.css */
+
+
+/* ── node labels (projected by the stage every frame) ─────────────────────── */
+.node-label { position: absolute; left: 0; top: 0; display: grid; justify-items: center; padding: 2px var(--s-1); background: color-mix(in oklch, var(--paper) 88%, transparent); border: 1px solid var(--line); border-radius: var(--r-1); font: var(--label-size)/1.25 var(--mono); letter-spacing: .05em; white-space: nowrap; }
+.node-label b { font-weight: 500; }
+.node-label span { color: var(--muted); }
+
+/* ── chrome: top bar ─────────────────────────────────────────────────────── ────────────────────────────────────────── */
+.topbar { position: absolute; inset: 0 0 auto; z-index: 4; height: var(--header-h); display: flex; align-items: center; gap: var(--s-5); padding: 0 var(--gutter); border-bottom: var(--hair); background: color-mix(in oklch, var(--paper) 72%, transparent); }
+.brand { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 24px; text-decoration: none; font-size: var(--step--1); font-weight: 800; letter-spacing: .12em; }
+.brand-symbol { width: 22px; height: 22px; display: grid; place-items: center; color: var(--paper); background: var(--ink); font-size: 20px; font-weight: 400; line-height: 1; }
+.topbar-status { margin-left: auto; color: var(--muted); font-size: var(--label-size); letter-spacing: var(--label-track); }
+.topbar .glass-btn { flex: none; }
+
+/* ── model load chip (non-blocking) ───────────────────────────────────────── */
+.load-chip { position: fixed; left: var(--gutter); bottom: var(--s-4); z-index: 10; padding: var(--s-2) var(--s-3); color: var(--ink); background: color-mix(in oklch, var(--paper) 90%, transparent); border: var(--hair); border-radius: var(--r-1); transition: opacity var(--d-slow) var(--e-exit) 1.4s, visibility 0s linear 1.9s; }
+.load-chip.is-done { opacity: 0; visibility: hidden; }
+
+/* ── responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .scene { justify-content: flex-end; padding-bottom: var(--s-7); }
+  .scene > * { max-width: 100%; }
+  .scene-overview .overview-head { max-width: 100%; }
+    .lead { font-size: var(--step-0); }
+  .readout { grid-template-columns: 1fr 1fr; }
+  .topbar-status { display: none; }
+  .topbar-link { margin-left: auto; }
+  .scroll-cue { display: none; }
+  .scene-burst .burst-loop { bottom: calc(-0.215 * 100vw + 79vh); }
+  .scene-enter .eyebrow { display: none; }
+  .scene-enter .lead { display: none; }
+  .scene-overview { justify-content: flex-end; }
+}
+@media (max-height: 760px) and (min-width: 901px) {
+  h1, h2 { font-size: var(--step-9); }
+  .lead { font-size: var(--step-0); margin-top: var(--s-4); }
+  .readout, .facts, .probe, .cta { margin-top: var(--s-4); }
+  .scroll-cue { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .scroll-cue i { animation: none; }
+  .load-chip { transition: opacity 120ms linear 1s, visibility 0s linear 1.2s; }
+}
+
+/* ThreeUI glass AI button host: the frame is cropped tight to the rendered capsule */
+.glass-ai { position: relative; display: block; width: min(460px, 100%); aspect-ratio: 2.9; overflow: hidden; border-radius: 999px; }
+.glass-ai iframe { position: absolute; left: -18%; top: -58%; width: 136%; height: 216%; border: 0; pointer-events: none; }
+.glass-ai--sm { width: 150px; flex: none; }
+.cta:has(.glass-ai) { flex-wrap: nowrap; gap: var(--s-3); }
+.cta .glass-ai { width: min(300px, 45%); }
+.topbar { min-width: 0; }
+.topbar .glass-ai--sm { width: 132px; margin-left: auto; }
+.topbar-status + .glass-ai--sm { margin-left: 0; }
+@media (max-width: 1000px) { .topbar-status { display: none; } }

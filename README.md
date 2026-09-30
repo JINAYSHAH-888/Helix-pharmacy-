@@ -2,7 +2,7 @@
 
 This is the integrated version of the supplied distributed-pharmacy RMI backend and the Helixis scroll-driven frontend.
 
-The product opens with the supplied 100-frame capsule sequence, then becomes a read-only operational console for the distributed system:
+The product opens on a live WebGL model of the six-node cluster (one persistent three.js canvas, see `scene/` and `engine/`), which follows the page through election, failover, vector clocks and a SHA-256 prescription chain, then becomes a read-only operational console for the distributed system:
 
 - six pharmacy RMI nodes and the Mumbai router;
 - live registry reachability and Bully coordinator visibility;
@@ -19,11 +19,35 @@ The product opens with the supplied 100-frame capsule sequence, then becomes a r
 - A modern browser
 - VS Code is recommended for editing and running the project
 
-PostgreSQL is not required by the current backend. `sql/reference/pharmacy_schema.sql` is preserved as a migration-ready reference; `HardcodedData.java` is the current source of truth.
+PostgreSQL 13+ is required: all pharmacy data lives in the `helixis_pharmacy` database (nothing is hard-coded in Java any more).
+
+## Database (PostgreSQL)
+
+One-time setup — creates the database and loads the schema plus seed rows from `sql/pharmacy_schema.sql`:
+
+```bash
+./scripts/db-setup.sh
+```
+
+`./scripts/db-setup.sh --reset` drops and reloads it. `./scripts/db-check.sh` (with the cluster and gateway running) proves the whole path end to end: row counts DB vs API, RMI nodes querying Postgres, and a live SQL update/insert/delete showing up in the API. The JDBC driver ships in `lib/`; every start script already has it on the classpath.
+
+Connection settings (optional environment variables): `PHARMACY_DB_URL` (default `jdbc:postgresql://localhost:5432/helixis_pharmacy`), `PHARMACY_DB_USER` (default: your OS user), `PHARMACY_DB_PASSWORD`.
+
+Edit data with plain SQL — the nodes and the control room pick it up within about two seconds:
+
+```sql
+-- psql -d helixis_pharmacy
+UPDATE branch_inventory SET quantity_available = 7
+ WHERE branch_id = (SELECT branch_id FROM pharmacy_branches WHERE branch_code = 'BR-DEL-01')
+   AND medicine_id = (SELECT medicine_id FROM medicines WHERE medicine_code = 'MED-0001');
+
+INSERT INTO medicines (medicine_code, name, generic_name, category, unit_of_measure, manufacturer)
+VALUES ('MED-0016', 'Ibuprofen 400mg', 'Ibuprofen', 'NSAID', 'tablet', 'Cipla Ltd.');
+```
 
 ## Run the complete project
 
-Open two terminals in the project folder.
+Run `./scripts/db-setup.sh` once, then open two terminals in the project folder.
 
 ### Terminal 1 — six-node RMI cluster
 
@@ -76,7 +100,7 @@ The exact same sequence can be run from the terminal:
 bash ./scripts/demo-fault-tolerance.sh
 ```
 
-This is an ephemeral simulation held inside the Java gateway process. Restarting `start-web.sh` resets it. It does not write `HardcodedData`, prescriptions, inventory, transactions, or PostgreSQL.
+This is an ephemeral simulation held inside the Java gateway process. Restarting `start-web.sh` resets it. It does not write prescriptions, inventory, transactions, or anything else in PostgreSQL.
 
 ## Explore the consistency & replication lab
 
@@ -98,11 +122,12 @@ The verdict banner and the metrics row (leader version, committed writes, nodes 
 ├── index.html                 # Scroll opening + control room UI
 ├── styles.css                 # Warm-white / black system interface
 ├── script.js                  # ScrollTrigger, data fetching, table + fault-lab + consistency-lab interactions
-├── frames/                    # 100 supplied capsule frames
-├── capsule-reference.mp4     # Fallback opening source
+├── scene/ engine/ shaders/    # WebGL cluster scene (three.js) for the control room
+├── landing/                   # Scroll-driven capsule landing page (React + three.js + GSAP)
 ├── src/com/pharmacy/rmi/      # Supplied RMI backend + HTTP gateway
 ├── scripts/                   # Compile, start cluster, start gateway, run fault demo
-├── sql/reference/             # Reference PostgreSQL schema and sample data
+├── sql/pharmacy_schema.sql    # PostgreSQL schema + seed data (loaded by scripts/db-setup.sh)
+├── lib/                       # PostgreSQL JDBC driver (42.7.4)
 ├── DESIGN.md                  # Durable visual/design context
 ├── ARCHITECTURE.md            # Runtime boundary, state, and verification notes
 └── index.agent                # Machine-readable public page companion

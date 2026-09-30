@@ -8,6 +8,8 @@ const state = {
   faultActionController: null,
   faultBusy: false,
   reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  tampered: new Set(),
+  networkTimer: 0,
 };
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -22,7 +24,8 @@ function statusClass(value) {
   const status = String(value ?? '').toUpperCase();
   if (['ONLINE', 'SYNCED', 'CONFIRMED', 'HEALTHY', 'VERIFIED', 'FULLY_DISPENSED', 'REPLICATED'].includes(status)) return 'is-good';
   if (['SYNCING', 'PENDING', 'PENDING_SYNC', 'LOCAL_ONLY', 'PARTIALLY_DISPENSED', 'LOW'].includes(status)) return 'is-warn';
-  if (['OFFLINE', 'DEGRADED', 'FAILED', 'CONFLICT', 'FLAGGED_DUPLICATE', 'EXPIRED', 'CANCELLED'].includes(status)) return 'is-bad';
+  // Red is reserved for the prescription 017 tamper state — failure states use a hollow ink marker.
+  if (['OFFLINE', 'DEGRADED', 'FAILED', 'CONFLICT', 'FLAGGED_DUPLICATE', 'EXPIRED', 'CANCELLED', 'NO RESPONSE'].includes(status)) return 'is-down';
   return '';
 }
 
@@ -53,6 +56,16 @@ async function apiGet(path, controller) {
   return response.json();
 }
 
+async function timedGet(path, controller) {
+  const start = performance.now();
+  const payload = await apiGet(path, controller);
+  return { payload, rtt: performance.now() - start };
+}
+
+function announce(name, detail) {
+  document.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
 async function apiPost(path, controller) {
   const response = await fetch(path, { method: 'POST', signal: controller?.signal });
   if (!response.ok) {
@@ -74,13 +87,18 @@ async function loadData({ quiet = false } = {}) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 4500);
   try {
-    const [overview, network, branches, medicines, prescriptions, inventory, transactions, database, faultTolerance] = await Promise.all([
-      apiGet('/api/overview', controller), apiGet('/api/network', controller), apiGet('/api/branches', controller),
+    const [overview, timedNetwork, branches, medicines, prescriptions, inventory, transactions, database, faultTolerance] = await Promise.all([
+      apiGet('/api/overview', controller), timedGet('/api/network', controller), apiGet('/api/branches', controller),
       apiGet('/api/medicines', controller), apiGet('/api/prescriptions', controller), apiGet('/api/inventory', controller),
       apiGet('/api/transactions', controller), apiGet('/api/database', controller), apiGet('/api/fault-tolerance', controller),
     ]);
+    const network = timedNetwork.payload;
     state.data = { overview, network, branches, medicines, prescriptions, inventory, transactions, database, faultTolerance };
     renderAll();
+    // hand the same payload to the WebGL scene (scene/main.js) — one fetch, two readers
+    window.helixisData = { ...state.data, rtt: timedNetwork.rtt };
+    announce('helixis:data', window.helixisData);
+    scheduleNetworkPoll();
     setGatewayState('ready', network.mode === 'rmi-live' ? 'RMI gateway live' : 'Catalog mode');
     $('#overview-source').textContent = network.mode === 'rmi-live' ? 'Java gateway · RMI registries reachable' : 'Java gateway · catalog mode';
     $('#overview-status-dot')?.classList.add('is-ready');
@@ -100,6 +118,22 @@ async function loadData({ quiet = false } = {}) {
       refreshButton.removeAttribute('aria-busy');
     }
   }
+}
+
+/* Re-probe the six registries every 5s so node state and gateway RTT in the scene stay live. */
+function scheduleNetworkPoll() {
+  window.clearTimeout(state.networkTimer);
+  state.networkTimer = window.setTimeout(async () => {
+    if (!document.hidden) {
+      try {
+        const { payload, rtt } = await timedGet('/api/network');
+        state.data.network = payload;
+        renderNetwork();
+        announce('helixis:network', { network: payload, rtt });
+      } catch (error) { /* keep the last known state; the header shows gateway health */ }
+    }
+    scheduleNetworkPoll();
+  }, 5000);
 }
 
 function renderAll() {
@@ -139,14 +173,23 @@ function renderNetwork() {
   $('#network-mode').textContent = String(network?.mode ?? 'catalog-only').toUpperCase();
   $('#reachable-label').textContent = `${network?.reachableNodes ?? 0} / ${network?.totalNodes ?? 6} REACHABLE`;
 
+  // Two sources, two fields: the branch record's declared status (catalog) and the
+  // registry probe (RMI). Each dot comes from its own value, so they cannot contradict.
+  const probed = network?.mode === 'rmi-live';
+  const dotClass = { 'is-good': 'is-online', 'is-warn': 'is-warn', 'is-down': 'is-offline' };
   $('#node-grid').innerHTML = nodes.map((node) => {
     const reachable = Boolean(node.reachable);
-    const status = reachable ? node.effectiveStatus : 'OFFLINE';
+    const declared = node.declaredStatus ?? 'UNKNOWN';
+    const probe = !probed ? 'NOT PROBED' : node.coordinator ? 'COORDINATOR' : reachable ? 'RESPONDING' : 'NO RESPONSE';
+    const probeClass = !probed ? 'is-idle' : reachable ? 'is-online' : 'is-offline';
     return `<article class="node-card ${node.coordinator ? 'is-coordinator' : ''}">
       <div class="node-card-head"><span>NODE ${String(node.nodeId).padStart(2, '0')}</span><span>PORT ${node.port}</span></div>
       <h3>${escapeHtml(node.name)}</h3>
       <p>${escapeHtml(node.branchName)} · ${escapeHtml(node.city)}<br />${escapeHtml(node.branchCode)}</p>
-      <div class="node-meta"><span class="node-status ${reachable ? 'is-online' : 'is-offline'}"><i></i>${escapeHtml(status)}</span><span>${node.coordinator ? 'COORDINATOR' : reachable ? 'RESPONDING' : 'NO RESPONSE'}</span></div>
+      <dl class="node-meta">
+        <div><dt>BRANCH RECORD</dt><dd class="node-status ${dotClass[statusClass(declared)] ?? ''}"><i aria-hidden="true"></i>${escapeHtml(declared)}</dd></div>
+        <div><dt>${probed ? 'RMI PROBE · LIVE' : 'RMI PROBE'}</dt><dd class="node-status ${probeClass}"><i aria-hidden="true"></i>${probe}</dd></div>
+      </dl>
     </article>`;
   }).join('') || '<div class="table-empty">No node registry data returned.</div>';
 }
@@ -210,6 +253,7 @@ async function runFaultToleranceAction(action) {
     const payload = await apiPost(`/api/fault-tolerance/action?action=${encodeURIComponent(action)}`, state.faultActionController);
     state.data.faultTolerance = payload;
     renderFaultTolerance();
+    announce('helixis:fault', payload);
   } catch (error) {
     if (error.name !== 'AbortError') {
       $('#fault-last-action').textContent = 'The simulation action could not reach the Java gateway.';
@@ -249,7 +293,7 @@ const datasetConfig = {
       { key: 'patientName', label: 'Patient / doctor', cell: (row) => `${escapeHtml(row.patientName)}<br /><small>${escapeHtml(row.doctorName)}</small>` },
       { key: 'medicineName', label: 'Medicine', cell: (row) => `${escapeHtml(row.medicineCode)}<br /><small>${escapeHtml(row.medicineName)}</small>` },
       { key: 'branchCode', label: 'Branch', cell: (row) => `${escapeHtml(row.branchCode)}<br /><small>${escapeHtml(row.branchCity)}</small>` },
-      { key: 'status', label: 'Status', cell: (row) => statusMarkup(row.status) },
+      { key: 'status', label: 'Status', cell: (row) => `${statusMarkup(row.status)}${state.tampered.has(row.id) ? '<br /><span class="data-state is-tampered">HASH MISMATCH · 017 DEMO</span>' : ''}` },
       { key: 'expiryDate', label: 'Expiry', cell: (row) => escapeHtml(row.expiryDate) },
     ],
   },
@@ -297,10 +341,117 @@ function renderTable() {
   }
   state.visibleRows = rows;
   $('#table-kicker').textContent = config.label;
+  $('#add-entry').hidden = state.dataset === 'branches';   // branches are fixed to the six RMI nodes
   $('#table-summary').textContent = `${number(rows.length)} records · ${state.sortKey ? `sorted by ${state.sortKey}` : 'source order'}`;
-  $('#table-state').textContent = 'READ ONLY';
-  $('#data-head').innerHTML = `<tr>${config.columns.map((column) => `<th scope="col"><button type="button" data-sort="${column.key}">${escapeHtml(column.label)} ${state.sortKey === column.key ? (state.sortDirection === 1 ? '↑' : '↓') : ''}</button></th>`).join('')}</tr>`;
-  $('#data-body').innerHTML = rows.length ? rows.map((row) => `<tr>${config.columns.map((column) => `<td>${column.trigger ? `<button class="record-trigger" type="button" data-row-id="${escapeHtml(row.id ?? row.code)}">${column.cell(row)}</button>` : column.cell(row)}</td>`).join('')}</tr>`).join('') : '<tr><td class="table-empty" colspan="6">No records in this collection.</td></tr>';
+  $('#data-head').innerHTML = `<tr>${config.columns.map((column) => {
+    const sorted = state.sortKey === column.key;
+    const ariaSort = sorted ? (state.sortDirection === 1 ? 'ascending' : 'descending') : 'none';
+    return `<th scope="col" aria-sort="${ariaSort}"><button type="button" data-sort="${column.key}">${escapeHtml(column.label)} <span aria-hidden="true">${sorted ? (state.sortDirection === 1 ? '↑' : '↓') : '↕'}</span></button></th>`;
+  }).join('')}</tr>`;
+  $('#table-panel')?.setAttribute('aria-labelledby', `tab-${state.dataset}`);
+  $('#data-body').innerHTML = rows.length ? rows.map((row) => `<tr${state.tampered.has(row.id) ? ' class="is-tampered-row"' : ''}>${config.columns.map((column) => `<td>${column.trigger ? `<button class="record-trigger" type="button" data-row-id="${escapeHtml(row.id ?? row.code)}">${column.cell(row)}</button>` : column.cell(row)}</td>`).join('')}</tr>`).join('') : '<tr><td class="table-empty" colspan="6">No records in this collection.</td></tr>';
+}
+
+/* ── add / edit entries: fields match RecordWriter.java on the gateway ── */
+const codes = (dataset, key = 'code') => (state.data[dataset]?.items ?? []).map((row) => row[key]);
+const entryFields = {
+  medicines: [
+    { key: 'code', label: 'Medicine code', placeholder: 'MED-0021' }, { key: 'name', label: 'Brand name' },
+    { key: 'genericName', label: 'Generic name' }, { key: 'category', label: 'Category' },
+    { key: 'unit', label: 'Unit', options: () => ['tablet', 'capsule', 'ml', 'vial', 'inhaler', 'sachet'] },
+    { key: 'manufacturer', label: 'Manufacturer' },
+    { key: 'controlled', label: 'Controlled substance', type: 'checkbox' },
+    { key: 'scheduleClass', label: 'Schedule class (controlled only)', optional: true, placeholder: 'Schedule II' },
+  ],
+  prescriptions: [
+    { key: 'patientName', label: 'Patient name' }, { key: 'patientId', label: 'Patient national ID' },
+    { key: 'doctorName', label: 'Doctor name' }, { key: 'doctorLicense', label: 'Doctor licence no.' },
+    { key: 'branchCode', label: 'Issuing branch', options: () => codes('branches') },
+    { key: 'medicineCode', label: 'Medicine', options: () => codes('medicines') },
+    { key: 'quantity', label: 'Quantity', type: 'number' }, { key: 'dosage', label: 'Dosage', optional: true },
+    { key: 'issueDate', label: 'Issue date', type: 'date' }, { key: 'expiryDate', label: 'Expiry date', type: 'date' },
+    { key: 'status', label: 'Status', options: () => ['PENDING', 'VERIFIED', 'PARTIALLY_DISPENSED', 'FULLY_DISPENSED', 'EXPIRED', 'CANCELLED', 'FLAGGED_DUPLICATE'] },
+  ],
+  inventory: [
+    { key: 'branchCode', label: 'Branch', options: () => codes('branches') },
+    { key: 'medicineCode', label: 'Medicine', options: () => codes('medicines') },
+    { key: 'quantity', label: 'Quantity available', type: 'number' },
+    { key: 'reorderThreshold', label: 'Reorder threshold', type: 'number' },
+    { key: 'syncStatus', label: 'Sync status', options: () => ['SYNCED', 'PENDING_SYNC', 'CONFLICT', 'FAILED'] },
+  ],
+  transactions: [
+    { key: 'prescriptionId', label: 'Prescription', options: () => codes('prescriptions', 'id') },
+    { key: 'branchCode', label: 'Dispensing branch', options: () => codes('branches') },
+    { key: 'pharmacist', label: 'Pharmacist' }, { key: 'license', label: 'Pharmacist licence no.' },
+    { key: 'quantity', label: 'Quantity', type: 'number' },
+    { key: 'idempotencyKey', label: 'Idempotency key', placeholder: 'DISP-BR01-20260930-0001' },
+    { key: 'syncStatus', label: 'Sync status', options: () => ['LOCAL_ONLY', 'REPLICATED', 'CONFIRMED'] },
+  ],
+  branches: [
+    { key: 'name', label: 'Branch name' }, { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
+    { key: 'declaredStatus', label: 'Node status', options: () => ['ONLINE', 'OFFLINE', 'SYNCING', 'DEGRADED', 'MAINTENANCE'] },
+  ],
+};
+
+function openEntryForm(row = null) {
+  const dialog = $('#entry-dialog');
+  const dataset = state.dataset;
+  state.editing = { dataset, id: row ? row.id : null };
+  const label = datasetConfig[dataset].label;
+  $('#entry-eyebrow').textContent = `${label} / ${row ? 'EDIT ENTRY' : 'NEW ENTRY'}`;
+  $('#entry-title').textContent = row ? `Edit ${row.code || row.name || row.patientName || row.branchCode || 'entry'}` : `Add to ${label.toLowerCase()}`;
+  $('#entry-feedback').textContent = '';
+  $('#entry-feedback').classList.remove('is-error');
+  $('#entry-fields').innerHTML = entryFields[dataset].map((field) => {
+    const value = row?.[field.key] ?? '';
+    const name = `name="${field.key}" id="entry-${field.key}"`;
+    if (field.type === 'checkbox') {
+      return `<label class="entry-field entry-field-check"><input type="checkbox" ${name}${value === true ? ' checked' : ''} /><span>${escapeHtml(field.label)}</span></label>`;
+    }
+    const control = field.options
+      ? `<select ${name}${field.optional ? '' : ' required'}>${row ? '' : '<option value="">Choose…</option>'}${field.options().map((option) => `<option${String(option) === String(value) ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`
+      : `<input ${name} type="${field.type ?? 'text'}"${field.type === 'number' ? ' min="0"' : ''} value="${escapeHtml(value)}" placeholder="${escapeHtml(field.placeholder ?? '')}"${field.optional ? '' : ' required'} />`;
+    return `<label class="entry-field"><span>${escapeHtml(field.label)}${field.optional ? '' : ' *'}</span>${control}</label>`;
+  }).join('');
+  if (!dialog.open) dialog.showModal();
+  $('#entry-fields input, #entry-fields select')?.focus();
+}
+
+async function saveEntry(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const feedback = $('#entry-feedback');
+  const missing = [...form.querySelectorAll('[required]')].find((input) => !input.value.trim());
+  if (missing) {
+    feedback.textContent = 'Fill in every field marked *.';
+    feedback.classList.add('is-error');
+    missing.focus();
+    return;
+  }
+  const { dataset, id } = state.editing;
+  const body = new URLSearchParams();
+  entryFields[dataset].forEach((field) => {
+    const input = form.elements[field.key];
+    body.set(field.key, field.type === 'checkbox' ? String(input.checked) : input.value);
+  });
+  const save = $('#entry-save');
+  save.disabled = true;
+  feedback.classList.remove('is-error');
+  feedback.textContent = 'Writing to PostgreSQL…';
+  try {
+    const url = `/api/records?dataset=${encodeURIComponent(dataset)}${id ? `&id=${encodeURIComponent(id)}` : ''}`;
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `Gateway returned ${response.status}`);
+    feedback.textContent = id ? 'Saved. The row is updated in the database.' : 'Saved. The new row is in the database.';
+    await loadData({ quiet: true });
+    window.setTimeout(() => $('#entry-dialog').close(), 700);
+  } catch (error) {
+    feedback.textContent = `Not saved: ${error.message}`;
+    feedback.classList.add('is-error');
+  } finally {
+    save.disabled = false;
+  }
 }
 
 function updateDatasetCounts() {
@@ -322,21 +473,9 @@ function openRecord(row) {
   const entries = Object.entries(row).filter(([key]) => key !== 'hash' || row.hash);
   const title = row.name || row.patientName || row.id || row.code || row.branchCode || 'Record';
   $('#dialog-content').innerHTML = `<p class="dialog-eyebrow">${escapeHtml(state.dataset.toUpperCase())} / RECORD DETAIL</p><h2 id="dialog-title">${escapeHtml(title)}</h2><div class="dialog-meta">${entries.map(([key, value]) => `<div><span class="mono">${escapeHtml(key.replace(/[A-Z]/g, (letter) => ` ${letter}`).toUpperCase())}</span><strong>${escapeHtml(jsonText(value))}</strong></div>`).join('')}</div>`;
-  if (typeof dialog.showModal === 'function') dialog.showModal();
-  else {
-    dialog.setAttribute('open', '');
-    dialog.classList.add('is-open');
-    document.body.classList.add('dialog-open');
-  }
-}
-
-function closeRecordDialog() {
-  const dialog = $('#record-dialog');
-  if (!dialog) return;
-  if (typeof dialog.close === 'function') dialog.close();
-  dialog.removeAttribute('open');
-  dialog.classList.remove('is-open');
-  document.body.classList.remove('dialog-open');
+  state.openRow = row;
+  // Native modal dialog: focus trap, Esc, top layer and inert background come from the platform.
+  dialog.showModal();
 }
 
 function renderSearchResults(payload) {
@@ -377,6 +516,16 @@ async function runSearch(event) {
 
 function setupDataInteractions() {
   $('#refresh-button')?.addEventListener('click', () => loadData());
+  $('#add-entry')?.addEventListener('click', () => openEntryForm());
+  $('#edit-entry')?.addEventListener('click', () => {
+    const row = state.openRow;
+    $('#record-dialog').close();
+    if (row) openEntryForm(row);
+  });
+  $('#entry-form')?.addEventListener('submit', saveEntry);
+  $('#entry-dialog')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
   $('#search-form')?.addEventListener('submit', runSearch);
   $('#search-input')?.addEventListener('input', (event) => {
     $('#clear-search').hidden = !event.target.value;
@@ -388,16 +537,32 @@ function setupDataInteractions() {
     $('#routed-results').hidden = true;
     $('#search-input').focus();
   });
-  $$('.dataset-tab').forEach((tab) => tab.addEventListener('click', () => {
+  const tabs = $$('.dataset-tab');
+  const selectTab = (tab, focus = false) => {
     state.dataset = tab.dataset.dataset;
     state.sortKey = null;
-    $$('.dataset-tab').forEach((other) => {
+    tabs.forEach((other) => {
       const active = other === tab;
       other.classList.toggle('is-active', active);
       other.setAttribute('aria-selected', String(active));
+      other.tabIndex = active ? 0 : -1;
     });
+    if (focus) tab.focus();
     renderTable();
-  }));
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => selectTab(tab));
+    tab.addEventListener('keydown', (event) => {
+      const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+      if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        selectTab(tabs[event.key === 'Home' ? 0 : tabs.length - 1], true);
+      } else if (step) {
+        event.preventDefault();
+        selectTab(tabs[(index + step + tabs.length) % tabs.length], true);
+      }
+    });
+  });
   $('#data-head')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-sort]');
     if (!button) return;
@@ -412,194 +577,102 @@ function setupDataInteractions() {
     const row = state.visibleRows.find((item) => String(item.id ?? item.code) === button.dataset.rowId);
     if (row) openRecord(row);
   });
-  $('#dialog-close')?.addEventListener('click', closeRecordDialog);
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeRecordDialog();
+  // Light-dismiss for engines without `closedby="any"`: a click on the backdrop lands on the dialog itself.
+  $('#record-dialog')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
+  document.addEventListener('helixis:chain', (event) => {
+    state.tampered = new Set(event.detail.tampered);
+    if (state.dataset === 'prescriptions') renderTable();
+  });
+  // In-page anchors: with ScrollSmoother the content is transformed, so route jumps through it.
+  document.addEventListener('click', (event) => {
+    const link = event.target.closest('a[href^="#"]');
+    const smoother = window.helixisScroll?.smoother;
+    if (!link || !smoother) return;
+    const target = document.querySelector(link.getAttribute('href'));
+    if (!target) return;
+    event.preventDefault();
+    smoother.scrollTo(target, true, 'top 76px');
+    target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+    history.replaceState(null, '', link.getAttribute('href'));
   });
 }
 
 function setupScrollReveals() {
+  // Reduced motion: content is already in its final state (no from-tween is ever created).
   if (!window.gsap || !window.ScrollTrigger || state.reducedMotion) return;
   $$('.reveal-section').forEach((section) => {
     if (section.dataset.motionReady) return;
     section.dataset.motionReady = 'true';
-    gsap.from(section.querySelectorAll('.section-rule, .overview-intro, .network-intro, .fault-intro, .explorer-intro, .database-intro, .metric-card, .node-card, .explorer-shell, .protocol-grid, .schema-row, .fault-toolbar, .fault-metrics, .fault-grid, .fault-sequence, .repl-console, .repl-notes'), {
-      y: 28, opacity: 0, duration: .7, stagger: .045, ease: 'power2.out', scrollTrigger: { trigger: section, start: 'top 78%', once: true }
+    const targets = section.querySelectorAll('.section-rule, .overview-intro, .network-intro, .fault-intro, .explorer-intro, .database-intro, .metric-card, .node-card, .explorer-shell, .protocol-grid, .schema-row, .fault-toolbar, .fault-metrics, .fault-grid, .fault-sequence, .repl-console, .repl-notes, .scene-panel, .integrity-console, .lb-intro, .lb-headline, .algo-grid, .console-panel, .flow-figure, .pool-grid, .result-grid, .compare-panel, .trace-panel, .mechanics-list');
+    // --d-slow + --e-enter; will-change only for the life of the tween
+    gsap.from(targets, {
+      y: 24, opacity: 0, duration: .48, stagger: .04, ease: 'enter',
+      onStart: () => gsap.set(targets, { willChange: 'transform, opacity' }),
+      onComplete: () => gsap.set(targets, { willChange: 'auto' }),
+      scrollTrigger: { trigger: section, start: 'top 78%', once: true },
     });
   });
 }
 
-function setupCapsuleOpening() {
-  const canvas = $('#capsule-canvas');
+/* Hero pin + smooth scroll. The capsule frame sequence is retired: the hero is now
+ * the live WebGL cluster (scene/main.js), which reads this trigger's progress.
+ *   pinSpacing: true  → the spacer holds the scroll distance, so content after the
+ *                       hero starts exactly when the flight ends (the old bug).
+ *   pinType: transform → required inside ScrollSmoother's transformed content.
+ *   distance           → `--scene-scroll` on .tablet-scene (in vh), read on refresh. */
+function setupOpening() {
   const scene = $('.tablet-scene');
-  const sequence = $('.capsule-frame-sequence');
-  if (!canvas || !scene || !window.gsap || !window.ScrollTrigger) {
+  const stage = $('.tablet-stage');
+  window.helixisScroll = { smoother: null, heroTrigger: null };
+  if (!scene || !stage || !window.gsap || !window.ScrollTrigger) {
     document.body.classList.remove('opening-active');
     return;
   }
-  const ctx = canvas.getContext('2d', { alpha: false });
-  gsap.registerPlugin(ScrollTrigger, ...(window.ScrollSmoother ? [window.ScrollSmoother] : []));
-  if (window.ScrollSmoother && !state.reducedMotion) {
+  gsap.registerPlugin(ScrollTrigger, ...(window.ScrollSmoother ? [window.ScrollSmoother] : []), ...(window.CustomEase ? [window.CustomEase] : []));
+  if (window.CustomEase) {
+    // the four motion tokens from DESIGN.md → Motion
+    CustomEase.create('std', '.4,0,.2,1');
+    CustomEase.create('enter', '.16,1,.3,1');
+    CustomEase.create('exit', '.7,0,.84,0');
+    CustomEase.create('move', '.65,0,.35,1');
+  }
+
+  if (state.reducedMotion) {
+    // No smoother, no pin, no scrub: the hero is a normal 100vh block showing the final state.
+    document.body.classList.remove('opening-active');
+    return;
+  }
+
+  let smoother = null;
+  if (window.ScrollSmoother) {
     try {
-      ScrollSmoother.create({ wrapper: '#smooth-wrapper', content: '#smooth-content', smooth: 1.1, effects: true, normalizeScroll: true });
+      // normalizeScroll stays off: it swallowed Space / PageDown / Home / End.
+      smoother = ScrollSmoother.create({ wrapper: '#smooth-wrapper', content: '#smooth-content', smooth: 1.1, effects: false, normalizeScroll: false });
     } catch (error) {
       console.warn('ScrollSmoother unavailable; using native scroll.', error);
     }
   }
-
-  // Vector fallback timeline — used only if the frame images fail to load.
-  const sceneConfig = {
-    trigger: scene, start: 'top top', end: 'bottom bottom', scrub: 1.05,
-    pin: '.tablet-stage', pinSpacing: false, invalidateOnRefresh: true,
+  const sceneScrollPx = () => (parseFloat(getComputedStyle(scene).getPropertyValue('--scene-scroll')) || 120) / 100 * window.innerHeight;
+  const heroTrigger = ScrollTrigger.create({
+    trigger: scene,
+    start: 'top top',
+    end: () => `+=${sceneScrollPx()}`,
+    pin: stage,
+    pinSpacing: true,
+    pinType: smoother ? 'transform' : 'fixed',
+    anticipatePin: 1,
+    invalidateOnRefresh: true,
+    onUpdate: (self) => stage.style.setProperty('--hero-progress', self.progress.toFixed(4)),
+    // will-change only while the pin is actually moving the stage
+    onToggle: (self) => { stage.style.willChange = self.isActive ? 'transform' : 'auto'; },
     onLeave: () => document.body.classList.remove('opening-active'),
     onEnterBack: () => document.body.classList.add('opening-active'),
-  };
-  let fallbackReveal = null;
-  const buildVectorFallback = () => {
-    fallbackReveal = gsap.timeline({ scrollTrigger: sceneConfig });
-    fallbackReveal
-      .to('.tablet-top', { x: '-=34', y: '-=205', rotationZ: -5, rotationX: -18, duration: .34, ease: 'power2.out' }, 0)
-      .to('.tablet-bottom', { x: '+=34', y: '+=205', rotationZ: 5, rotationX: 18, duration: .34, ease: 'power2.out' }, 0)
-      .to('.tablet-inside', { scale: 2.05, duration: .42, ease: 'power2.inOut' }, .18)
-      .to('.tablet-stage', { scale: 1.2, duration: .42, ease: 'power2.inOut' }, .18)
-      .to('.tablet-stage', { scale: 1, duration: .18, ease: 'power2.out' }, .7)
-      .to('.tablet-top, .tablet-bottom', { opacity: 0, duration: .11 }, .71)
-      .to('.tablet-inside', { opacity: 0, scale: .8, duration: .14 }, .8)
-      .to('.tablet-shadow', { opacity: 0, duration: .14 }, .8);
-  };
-
-  const frameCount = 100;
-  const frameUrl = (index) => `frames/frame_${String(index + 1).padStart(3, '0')}.jpg`;
-  const images = new Array(frameCount);
-  const proxy = { frame: 0 };
-  let lastDrawn = -1;
-  let lastW = 0;
-  let lastH = 0;
-
-  const sizeCanvas = () => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    // Size from the viewport, not canvas.clientWidth: the stage is always full
-    // screen, and clientWidth can read 0 during ScrollSmoother/pin layout setup,
-    // which would leave the canvas at its 300x150 default (blurry).
-    const cw = canvas.clientWidth || window.innerWidth;
-    const ch = canvas.clientHeight || window.innerHeight;
-    const w = Math.round(cw * dpr);
-    const h = Math.round(ch * dpr);
-    if (!w || !h) return false;
-    if (w === lastW && h === lastH) return false;
-    canvas.width = lastW = w;
-    canvas.height = lastH = h;
-    return true;
-  };
-
-  // Draw one frame to the canvas with cover/contain fit and high-quality scaling.
-  const draw = (value, force = false) => {
-    const index = Math.max(0, Math.min(frameCount - 1, Math.round(value)));
-    const img = images[index];
-    if (!img || !img.complete || !img.naturalWidth) return;
-    if (!force && index === lastDrawn) return;
-    lastDrawn = index;
-    const cw = canvas.width;
-    const ch = canvas.height;
-    const iw = img.naturalWidth;
-    const ih = img.naturalHeight;
-    // Cover on wide viewports for a full-bleed hero; contain on narrow/portrait
-    // so the capsule is never cropped when the halves swing open.
-    const portrait = cw / ch < 1.2;
-    const scale = portrait
-      ? Math.min(cw / iw, ch / ih)
-      : Math.max(cw / iw, ch / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    const dx = (cw - dw) / 2;
-    const dy = (ch - dh) / 2;
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--paper') || '#f3f2ec';
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, dx, dy, dw, dh);
-  };
-
-  const redraw = () => { sizeCanvas(); draw(proxy.frame, true); };
-
-  let scrubTrigger = null;
-  const startSequence = () => {
-    sequence.classList.remove('is-loading');
-    sequence.classList.add('is-ready');
-    gsap.set('.tablet, .tablet-inside, .tablet-shadow', { autoAlpha: 0 });
-    sizeCanvas();
-    draw(0, true);
-    // Corrective repaints in case the first sizing raced with layout/font load.
-    requestAnimationFrame(redraw);
-    window.addEventListener('load', redraw, { once: true });
-
-    if (state.reducedMotion) {
-      // No scroll-scrub: collapse the tall scene and show the final frame.
-      scene.style.height = '100vh';
-      draw(frameCount - 1, true);
-      document.body.classList.remove('opening-active');
-      ScrollTrigger.refresh();
-      return;
-    }
-
-    scrubTrigger = gsap.to(proxy, {
-      frame: frameCount - 1,
-      ease: 'none',
-      scrollTrigger: {
-        trigger: scene,
-        start: 'top top',
-        end: 'bottom bottom',
-        scrub: 1,
-        pin: '.tablet-stage',
-        pinSpacing: false,
-        anticipatePin: 1,
-        invalidateOnRefresh: true,
-        onUpdate: () => draw(proxy.frame),
-        onLeave: () => document.body.classList.remove('opening-active'),
-        onEnterBack: () => document.body.classList.add('opening-active'),
-      },
-    });
-    ScrollTrigger.refresh();
-  };
-
-  // Preload every frame; start scrubbing as soon as the first is ready and
-  // refresh once the whole sequence has decoded so scroll math is accurate.
-  let loaded = 0;
-  const onFrameReady = (index) => {
-    loaded += 1;
-    if (index === lastDrawn) draw(proxy.frame, true);
-    if (loaded === frameCount) ScrollTrigger.refresh();
-  };
-
-  const first = new Image();
-  first.decoding = 'async';
-  first.onload = () => {
-    images[0] = first;
-    startSequence();
-    for (let index = 1; index < frameCount; index += 1) {
-      const image = new Image();
-      image.decoding = 'async';
-      image.onload = () => onFrameReady(index);
-      image.onerror = () => onFrameReady(index);
-      image.src = frameUrl(index);
-      images[index] = image;
-    }
-  };
-  first.onerror = () => {
-    // Frames unavailable — fall back to the pure-CSS vector capsule.
-    console.warn('Capsule frames failed to load; using vector fallback.');
-    buildVectorFallback();
-    ScrollTrigger.refresh();
-  };
-
-  sequence.classList.add('is-loading');
-  first.src = frameUrl(0);
-
-  window.addEventListener('resize', redraw, { passive: true });
-  // A refresh (pin re-measure, resize, layout change) can resize — and thereby
-  // clear — the canvas, so always repaint the current frame afterwards.
-  ScrollTrigger.addEventListener('refresh', redraw);
-};
+  });
+  window.helixisScroll = { smoother, heroTrigger };
+}
 
 /* ── Consistency & replication lab ────────────────────────────────
  * A self-contained, client-side single-leader replication model.
@@ -917,7 +990,7 @@ function setupConsistencyLab() {
     $$('#repl-mode .repl-seg-btn').forEach((other) => {
       const active = other === btn;
       other.classList.toggle('is-active', active);
-      other.setAttribute('aria-selected', String(active));
+      other.setAttribute('aria-pressed', String(active));
     });
     renderConfig();
   }));
@@ -949,6 +1022,7 @@ function setupConsistencyLab() {
 setupDataInteractions();
 setupFaultToleranceInteractions();
 setupConsistencyLab();
-setupCapsuleOpening();
+setupOpening();
 loadData();
-window.addEventListener('resize', () => window.ScrollTrigger?.refresh());
+// Web fonts change line boxes after first layout; re-measure triggers once they land.
+document.fonts?.ready.then(() => window.ScrollTrigger?.refresh());

@@ -9,8 +9,10 @@ import com.pharmacy.rmi.model.Prescription;
 import com.pharmacy.rmi.model.SearchRequest;
 import com.pharmacy.rmi.model.SearchResponse;
 import com.pharmacy.rmi.model.SearchType;
-import com.pharmacy.rmi.server.HardcodedData;
+import com.pharmacy.rmi.server.PharmacyData;
 import com.pharmacy.rmi.server.PharmacyRouter;
+import com.pharmacy.rmi.server.RecordWriter;
+import com.pharmacy.rmi.balancer.LoadBalancerLab;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -40,9 +42,9 @@ import java.net.Socket;
 /**
  * Same-origin browser gateway for the supplied RMI pharmacy system.
  *
- * The gateway is deliberately read-only: it exposes the existing in-memory
- * dataset and probes the six RMI node registries without creating a second
- * source of truth. The original RMI servers remain the distributed runtime.
+ * The gateway reads the PostgreSQL dataset, probes the six RMI node registries, and
+ * accepts add/update writes from the data explorer (POST /api/records). The original
+ * RMI servers remain the distributed runtime.
  */
 public final class PharmacyWebServer {
     private PharmacyWebServer() {}
@@ -94,11 +96,27 @@ public final class PharmacyWebServer {
                     sendJson(exchange, 200, service.handleFaultToleranceAction(query.getOrDefault("action", "")));
                     return;
                 }
+                if ("POST".equalsIgnoreCase(exchange.getRequestMethod()) && "/load-balancer/action".equals(endpoint)) {
+                    sendJson(exchange, 200, service.handleLoadBalancerAction(query));
+                    return;
+                }
+                if ("POST".equalsIgnoreCase(exchange.getRequestMethod()) && "/records".equals(endpoint)) {
+                    // body is form-encoded; ?id=… means update, otherwise insert
+                    Map<String, String> body = query(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                    String dataset = query.getOrDefault("dataset", "");
+                    String id = query.get("id");
+                    String saved = id == null || id.isBlank()
+                            ? RecordWriter.insert(dataset, body)
+                            : RecordWriter.update(dataset, id, body);
+                    sendJson(exchange, 200, Json.object(Json.field("status", "saved"), Json.field("id", saved),
+                            Json.field("mode", id == null || id.isBlank() ? "insert" : "update")));
+                    return;
+                }
                 sendJson(exchange, 405, Json.object(Json.field("error", "Method not allowed")));
             } catch (Exception error) {
                 int status = error instanceof IllegalArgumentException ? 400 : 500;
                 sendJson(exchange, status, Json.object(
-                        Json.field("error", status == 400 ? "Invalid simulation action" : "The gateway could not complete this request"),
+                        Json.field("error", status == 400 ? "Invalid request" : "The gateway could not complete this request"),
                         Json.field("detail", error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage())));
             }
         }
@@ -121,7 +139,7 @@ public final class PharmacyWebServer {
 
         private static void addCors(Headers headers) {
             headers.set("Access-Control-Allow-Origin", "*");
-            headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+            headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             headers.set("Access-Control-Allow-Headers", "Content-Type");
             headers.set("Cache-Control", "no-store");
         }
@@ -193,12 +211,12 @@ public final class PharmacyWebServer {
 
     private static final class ApiService {
         private static final List<NodeDefinition> NODES = List.of(
-                new NodeDefinition(1, "Mumbai", 1099, "a1000000-0000-0000-0000-000000000002", "BR-MUM-02"),
-                new NodeDefinition(2, "Pune", 1100, "a1000000-0000-0000-0000-000000000006", "BR-PUN-06"),
-                new NodeDefinition(3, "Bengaluru", 1101, "a1000000-0000-0000-0000-000000000003", "BR-BLR-03"),
-                new NodeDefinition(4, "Delhi", 1102, "a1000000-0000-0000-0000-000000000001", "BR-DEL-01"),
-                new NodeDefinition(5, "Hyderabad", 1103, "a1000000-0000-0000-0000-000000000004", "BR-HYD-04"),
-                new NodeDefinition(6, "Chennai", 1104, "a1000000-0000-0000-0000-000000000005", "BR-CHN-05"));
+                new NodeDefinition(1, "Mumbai", 1099, "BR-MUM-02"),
+                new NodeDefinition(2, "Pune", 1100, "BR-PUN-06"),
+                new NodeDefinition(3, "Bengaluru", 1101, "BR-BLR-03"),
+                new NodeDefinition(4, "Delhi", 1102, "BR-DEL-01"),
+                new NodeDefinition(5, "Hyderabad", 1103, "BR-HYD-04"),
+                new NodeDefinition(6, "Chennai", 1104, "BR-CHN-05"));
 
         private String handle(String endpoint, Map<String, String> query) {
             return switch (endpoint) {
@@ -218,12 +236,78 @@ public final class PharmacyWebServer {
                 case "/transactions" -> transactionsJson();
                 case "/database" -> databaseJson();
                 case "/fault-tolerance" -> faultToleranceJson();
+                case "/load-balancer" -> loadBalancerJson(balancer.snapshot());
                 case "/search" -> searchJson(query.getOrDefault("type", "ANY"), query.getOrDefault("q", ""));
                 default -> Json.object(Json.field("error", "Unknown API route"), Json.field("path", endpoint));
             };
         }
 
         private final PrimaryBackupSimulation faultTolerance = new PrimaryBackupSimulation();
+        private final LoadBalancerLab balancer = new LoadBalancerLab();
+
+        private String handleLoadBalancerAction(Map<String, String> query) {
+            return loadBalancerJson(balancer.apply(query.getOrDefault("action", ""), query));
+        }
+
+        private static String loadBalancerJson(LoadBalancerLab.Snapshot lab) {
+            List<String> backends = lab.backends().stream().map(node -> Json.object(
+                    Json.number("id", node.id()), Json.field("name", node.name()),
+                    Json.number("port", node.port()), Json.field("branchCode", node.branchCode()),
+                    Json.number("weight", node.weight()), Json.number("addedLatencyMs", node.addedLatencyMs()),
+                    Json.field("health", node.health()), Json.field("breaker", node.breaker()),
+                    Json.bool("reachable", node.reachable()), Json.bool("operatorDown", node.operatorDown()),
+                    Json.number("inFlight", node.inFlight()), Json.number("dispatched", node.dispatched()),
+                    Json.number("completed", node.completed()), Json.number("failed", node.failed()),
+                    Json.decimal("ewmaMs", node.ewmaMs()), Json.decimal("peakMs", node.peakMs()),
+                    Json.number("lastMatches", node.lastMatches()),
+                    Json.decimal("sharePercent", node.sharePercent()))).toList();
+
+            List<String> strategies = lab.strategies().stream().map(item -> Json.object(
+                    Json.field("id", item.id()), Json.field("label", item.label()),
+                    Json.field("formula", item.formula()), Json.field("how", item.how()),
+                    Json.field("why", item.why()), Json.bool("keyed", item.keyed()),
+                    Json.bool("active", item.active()))).toList();
+
+            List<String> traces = lab.trace().stream().map(entry -> Json.object(
+                    Json.number("sequence", entry.sequence()), Json.field("key", entry.key()),
+                    Json.field("node", entry.node()), Json.field("reason", entry.reason()),
+                    Json.decimal("latencyMs", entry.latencyMs()), Json.field("transport", entry.transport()),
+                    Json.field("status", entry.status()))).toList();
+
+            return Json.object(
+                    Json.field("strategy", lab.strategy()), Json.field("strategyLabel", lab.strategyLabel()),
+                    Json.field("formula", lab.formula()), Json.field("how", lab.how()), Json.field("why", lab.why()),
+                    Json.number("requests", lab.requests()), Json.number("concurrency", lab.concurrency()),
+                    Json.field("skew", lab.skew()), Json.field("skewLabel", lab.skewLabel()),
+                    Json.bool("busy", lab.busy()), Json.field("lastAction", lab.lastAction()),
+                    Json.field("dataSource", PharmacyData.describeSource()),
+                    Json.field("updatedAt", Instant.now().toString()),
+                    Json.raw("backends", Json.array(backends)),
+                    Json.raw("strategies", Json.array(strategies)),
+                    Json.raw("lastRun", runJson(lab.lastRun())),
+                    Json.raw("history", Json.array(lab.history().stream().map(PharmacyWebServer.ApiService::runJson).toList())),
+                    Json.raw("comparison", Json.array(lab.comparison().stream().map(PharmacyWebServer.ApiService::runJson).toList())),
+                    Json.raw("trace", Json.array(traces)));
+        }
+
+        private static String runJson(LoadBalancerLab.RunSummary run) {
+            if (run == null) return "null";
+            List<String> shares = run.shares().stream().map(share -> Json.object(
+                    Json.field("node", share.node()), Json.field("branchCode", share.branchCode()),
+                    Json.number("dispatched", share.dispatched()), Json.number("completed", share.completed()),
+                    Json.number("failed", share.failed()), Json.decimal("sharePercent", share.sharePercent()),
+                    Json.decimal("ewmaMs", share.ewmaMs()))).toList();
+            return Json.object(
+                    Json.number("run", run.run()), Json.field("strategy", run.strategy()),
+                    Json.field("strategyLabel", run.strategyLabel()), Json.number("requests", run.requests()),
+                    Json.number("concurrency", run.concurrency()), Json.field("skew", run.skew()),
+                    Json.decimal("durationMs", run.durationMs()), Json.decimal("throughput", run.throughput()),
+                    Json.decimal("p50Ms", run.p50Ms()), Json.decimal("p95Ms", run.p95Ms()),
+                    Json.decimal("p99Ms", run.p99Ms()), Json.decimal("meanMs", run.meanMs()),
+                    Json.number("errors", run.errors()), Json.number("rejected", run.rejected()),
+                    Json.decimal("fairness", run.fairness()), Json.decimal("spreadPercent", run.spreadPercent()),
+                    Json.raw("shares", Json.array(shares)));
+        }
 
         private String handleFaultToleranceAction(String action) {
             return faultToleranceJson(faultTolerance.apply(action));
@@ -290,32 +374,32 @@ public final class PharmacyWebServer {
             return Json.object(
                     Json.field("status", "ok"),
                     Json.field("gateway", "ready"),
-                    Json.field("dataSource", "HardcodedData in Java RMI project"),
+                    Json.field("dataSource", "PostgreSQL (" + PharmacyData.describeSource() + ")"),
                     Json.bool("rmiRouterReachable", reachable > 0 && routerAvailable()),
                     Json.field("checkedAt", Instant.now().toString()));
         }
 
         private String overviewJson() {
             List<NodeView> nodes = nodeViews();
-            long totalUnits = HardcodedData.INVENTORY.stream().mapToLong(Inventory::quantity).sum();
-            long lowStock = HardcodedData.INVENTORY.stream()
+            long totalUnits = PharmacyData.inventory().stream().mapToLong(Inventory::quantity).sum();
+            long lowStock = PharmacyData.inventory().stream()
                     .filter(row -> row.quantity() <= row.reorderThreshold()).count();
-            long pendingSync = HardcodedData.INVENTORY.stream()
+            long pendingSync = PharmacyData.inventory().stream()
                     .filter(row -> !"SYNCED".equals(row.syncStatus())).count();
-            long controlled = HardcodedData.MEDICINES.stream().filter(Medicine::controlled).count();
+            long controlled = PharmacyData.medicines().stream().filter(Medicine::controlled).count();
             long reachable = nodes.stream().filter(NodeView::reachable).count();
-            Map<String, Long> branchStatuses = countBy(HardcodedData.BRANCHES.stream().map(PharmacyBranch::status).toList());
-            Map<String, Long> transactionStatuses = countBy(HardcodedData.TRANSACTIONS.stream().map(DispensingTransaction::syncStatus).toList());
+            Map<String, Long> branchStatuses = countBy(PharmacyData.branches().stream().map(PharmacyBranch::status).toList());
+            Map<String, Long> transactionStatuses = countBy(PharmacyData.transactions().stream().map(DispensingTransaction::syncStatus).toList());
 
             return Json.object(
                     Json.field("generatedAt", Instant.now().toString()),
-                    Json.field("source", "HardcodedData + live RMI registry probes"),
+                    Json.field("source", "PostgreSQL + live RMI registry probes"),
                     Json.raw("counts", Json.object(
-                            Json.number("branches", HardcodedData.BRANCHES.size()),
-                            Json.number("medicines", HardcodedData.MEDICINES.size()),
-                            Json.number("prescriptions", HardcodedData.PRESCRIPTIONS.size()),
-                            Json.number("inventoryRows", HardcodedData.INVENTORY.size()),
-                            Json.number("transactions", HardcodedData.TRANSACTIONS.size()),
+                            Json.number("branches", PharmacyData.branches().size()),
+                            Json.number("medicines", PharmacyData.medicines().size()),
+                            Json.number("prescriptions", PharmacyData.prescriptions().size()),
+                            Json.number("inventoryRows", PharmacyData.inventory().size()),
+                            Json.number("transactions", PharmacyData.transactions().size()),
                             Json.number("controlledMedicines", controlled))),
                     Json.raw("inventory", Json.object(
                             Json.number("totalUnits", totalUnits),
@@ -371,11 +455,11 @@ public final class PharmacyWebServer {
 
         private String medicinesJson() {
             List<String> rows = new ArrayList<>();
-            for (Medicine medicine : HardcodedData.MEDICINES) {
-                int stock = HardcodedData.INVENTORY.stream()
+            for (Medicine medicine : PharmacyData.medicines()) {
+                int stock = PharmacyData.inventory().stream()
                         .filter(row -> row.medicineId().equals(medicine.id()))
                         .mapToInt(Inventory::quantity).sum();
-                long branches = HardcodedData.INVENTORY.stream()
+                long branches = PharmacyData.inventory().stream()
                         .filter(row -> row.medicineId().equals(medicine.id())).map(Inventory::branchId).distinct().count();
                 rows.add(Json.object(
                         Json.field("id", medicine.id()), Json.field("code", medicine.code()),
@@ -390,9 +474,9 @@ public final class PharmacyWebServer {
 
         private String prescriptionsJson() {
             List<String> rows = new ArrayList<>();
-            for (Prescription prescription : HardcodedData.PRESCRIPTIONS) {
-                Medicine medicine = HardcodedData.medicineById(prescription.medicineId());
-                PharmacyBranch branch = HardcodedData.branchById(prescription.branchId());
+            for (Prescription prescription : PharmacyData.prescriptions()) {
+                Medicine medicine = PharmacyData.medicineById(prescription.medicineId());
+                PharmacyBranch branch = PharmacyData.branchById(prescription.branchId());
                 rows.add(Json.object(
                         Json.field("id", prescription.id()), Json.field("hash", prescription.hash()),
                         Json.field("patientName", prescription.patientName()), Json.field("patientId", prescription.patientId()),
@@ -410,9 +494,9 @@ public final class PharmacyWebServer {
 
         private String inventoryJson() {
             List<String> rows = new ArrayList<>();
-            for (Inventory inventory : HardcodedData.INVENTORY) {
-                PharmacyBranch branch = HardcodedData.branchById(inventory.branchId());
-                Medicine medicine = HardcodedData.medicineById(inventory.medicineId());
+            for (Inventory inventory : PharmacyData.inventory()) {
+                PharmacyBranch branch = PharmacyData.branchById(inventory.branchId());
+                Medicine medicine = PharmacyData.medicineById(inventory.medicineId());
                 rows.add(Json.object(
                         Json.field("id", inventory.id()), Json.field("branchCode", branch == null ? inventory.branchId() : branch.code()),
                         Json.field("branchCity", branch == null ? "Unknown" : branch.city()),
@@ -427,9 +511,9 @@ public final class PharmacyWebServer {
 
         private String transactionsJson() {
             List<String> rows = new ArrayList<>();
-            for (DispensingTransaction transaction : HardcodedData.TRANSACTIONS) {
-                PharmacyBranch branch = HardcodedData.branchById(transaction.branchId());
-                Prescription prescription = HardcodedData.PRESCRIPTIONS.stream()
+            for (DispensingTransaction transaction : PharmacyData.transactions()) {
+                PharmacyBranch branch = PharmacyData.branchById(transaction.branchId());
+                Prescription prescription = PharmacyData.prescriptions().stream()
                         .filter(row -> row.id().equals(transaction.prescriptionId())).findFirst().orElse(null);
                 rows.add(Json.object(
                         Json.field("id", transaction.id()), Json.field("prescriptionId", transaction.prescriptionId()),
@@ -445,15 +529,15 @@ public final class PharmacyWebServer {
 
         private String databaseJson() {
             List<String> tables = List.of(
-                    Json.object(Json.field("name", "pharmacy_branches"), Json.number("rows", 6), Json.field("role", "Distributed node registry"), Json.field("consistency", "Registry + heartbeat"), Json.field("keyFields", "branch_id, branch_code, node_status")),
-                    Json.object(Json.field("name", "medicines"), Json.number("rows", 15), Json.field("role", "Shared read-mostly catalogue"), Json.field("consistency", "Logical replication"), Json.field("keyFields", "medicine_id, medicine_code, controlled flag")),
-                    Json.object(Json.field("name", "prescriptions"), Json.number("rows", 20), Json.field("role", "Tamper-evident clinical instructions"), Json.field("consistency", "Optimistic versioning"), Json.field("keyFields", "prescription_id, hash, version, status")),
-                    Json.object(Json.field("name", "branch_inventory"), Json.number("rows", 24), Json.field("role", "Branch-local stock view"), Json.field("consistency", "Vector clock + eventual sync"), Json.field("keyFields", "branch_id, medicine_id, sync_status")),
-                    Json.object(Json.field("name", "dispensing_transactions"), Json.number("rows", 12), Json.field("role", "Exactly-once dispensing ledger"), Json.field("consistency", "Idempotent replication"), Json.field("keyFields", "transaction_id, prescription_id, idempotency_key")));
+                    Json.object(Json.field("name", "pharmacy_branches"), Json.number("rows", PharmacyData.branches().size()), Json.field("role", "Distributed node registry"), Json.field("consistency", "Registry + heartbeat"), Json.field("keyFields", "branch_id, branch_code, node_status")),
+                    Json.object(Json.field("name", "medicines"), Json.number("rows", PharmacyData.medicines().size()), Json.field("role", "Shared read-mostly catalogue"), Json.field("consistency", "Logical replication"), Json.field("keyFields", "medicine_id, medicine_code, controlled flag")),
+                    Json.object(Json.field("name", "prescriptions"), Json.number("rows", PharmacyData.prescriptions().size()), Json.field("role", "Tamper-evident clinical instructions"), Json.field("consistency", "Optimistic versioning"), Json.field("keyFields", "prescription_id, hash, version, status")),
+                    Json.object(Json.field("name", "branch_inventory"), Json.number("rows", PharmacyData.inventory().size()), Json.field("role", "Branch-local stock view"), Json.field("consistency", "Vector clock + eventual sync"), Json.field("keyFields", "branch_id, medicine_id, sync_status")),
+                    Json.object(Json.field("name", "dispensing_transactions"), Json.number("rows", PharmacyData.transactions().size()), Json.field("role", "Exactly-once dispensing ledger"), Json.field("consistency", "Idempotent replication"), Json.field("keyFields", "transaction_id, prescription_id, idempotency_key")));
             return Json.object(
-                    Json.field("engine", "Java in-memory HardcodedData"),
-                    Json.field("referenceSchema", "sql/reference/pharmacy_schema.sql"),
-                    Json.field("note", "The SQL schema is preserved as reference; this demo runtime does not open a database connection."),
+                    Json.field("engine", "PostgreSQL · " + PharmacyData.describeSource()),
+                    Json.field("referenceSchema", "sql/pharmacy_schema.sql"),
+                    Json.field("note", "Live: every node and this gateway read these tables over JDBC (2 s cache). Edit rows with SQL and refresh."),
                     Json.raw("tables", Json.array(tables)));
         }
 
@@ -477,36 +561,36 @@ public final class PharmacyWebServer {
             if (query.isBlank()) return List.of();
             List<SearchRecord> records = new ArrayList<>();
             Set<String> seen = new LinkedHashSet<>();
-            for (Medicine medicine : HardcodedData.MEDICINES) {
+            for (Medicine medicine : PharmacyData.medicines()) {
                 boolean medicineMatch = contains(query, medicine.code(), medicine.name(), medicine.genericName(), medicine.category());
                 if ((type == SearchType.MEDICINE || type == SearchType.ANY) && medicineMatch) {
                     add(records, seen, SearchRecord.medicine(medicine));
                 }
                 if ((type == SearchType.MEDICINE || type == SearchType.ANY) && medicineMatch) {
-                    for (Inventory inventory : HardcodedData.INVENTORY) {
+                    for (Inventory inventory : PharmacyData.inventory()) {
                         if (inventory.medicineId().equals(medicine.id())) add(records, seen, SearchRecord.inventory(inventory));
                     }
-                    for (Prescription prescription : HardcodedData.PRESCRIPTIONS) {
+                    for (Prescription prescription : PharmacyData.prescriptions()) {
                         if (prescription.medicineId().equals(medicine.id())) add(records, seen, SearchRecord.prescription(prescription));
                     }
                 }
             }
-            for (Prescription prescription : HardcodedData.PRESCRIPTIONS) {
+            for (Prescription prescription : PharmacyData.prescriptions()) {
                 boolean direct = contains(query, prescription.id(), prescription.hash(), prescription.patientId(), prescription.patientName(), prescription.doctorName());
                 if ((type == SearchType.PRESCRIPTION || type == SearchType.ANY) && direct) add(records, seen, SearchRecord.prescription(prescription));
                 if (type == SearchType.PATIENT && contains(query, prescription.patientId(), prescription.patientName())) add(records, seen, SearchRecord.prescription(prescription));
                 if (type == SearchType.PRESCRIPTION && direct) {
-                    for (DispensingTransaction transaction : HardcodedData.TRANSACTIONS) {
+                    for (DispensingTransaction transaction : PharmacyData.transactions()) {
                         if (transaction.prescriptionId().equals(prescription.id())) add(records, seen, SearchRecord.transaction(transaction));
                     }
                 }
             }
-            for (Inventory inventory : HardcodedData.INVENTORY) {
-                Medicine medicine = HardcodedData.medicineById(inventory.medicineId());
+            for (Inventory inventory : PharmacyData.inventory()) {
+                Medicine medicine = PharmacyData.medicineById(inventory.medicineId());
                 boolean match = contains(query, inventory.id(), inventory.branchId(), medicine == null ? "" : medicine.code(), medicine == null ? "" : medicine.name());
                 if ((type == SearchType.INVENTORY || type == SearchType.ANY) && match) add(records, seen, SearchRecord.inventory(inventory));
             }
-            for (DispensingTransaction transaction : HardcodedData.TRANSACTIONS) {
+            for (DispensingTransaction transaction : PharmacyData.transactions()) {
                 boolean match = contains(query, transaction.id(), transaction.prescriptionId(), transaction.idempotencyKey(), transaction.pharmacist());
                 if ((type == SearchType.TRANSACTION || type == SearchType.ANY) && match) add(records, seen, SearchRecord.transaction(transaction));
                 if (type == SearchType.PRESCRIPTION && match) add(records, seen, SearchRecord.transaction(transaction));
@@ -550,7 +634,7 @@ public final class PharmacyWebServer {
             List<NodeView> nodes = new ArrayList<>();
             int coordinatorId = -1;
             for (NodeDefinition definition : NODES) {
-                PharmacyBranch branch = HardcodedData.branchById(definition.branchId());
+                PharmacyBranch branch = PharmacyData.branchByCode(definition.branchCode());
                 boolean reachable = canConnect(definition.port());
                 if (reachable) coordinatorId = Math.max(coordinatorId, definition.id());
                 nodes.add(new NodeView(definition, branch, reachable, false));
@@ -591,7 +675,8 @@ public final class PharmacyWebServer {
         }
     }
 
-    private record NodeDefinition(int id, String name, int port, String branchId, String branchCode) {}
+    /** RMI topology (node id = bully priority, port, served branch code). Branch rows come from PostgreSQL. */
+    private record NodeDefinition(int id, String name, int port, String branchCode) {}
 
     private record NodeView(NodeDefinition definition, PharmacyBranch branch, boolean reachable, boolean coordinator) {
         private String effectiveStatus() {
@@ -610,19 +695,19 @@ public final class PharmacyWebServer {
         }
 
         private static SearchRecord prescription(Prescription prescription) {
-            PharmacyBranch branch = HardcodedData.branchById(prescription.branchId());
-            Medicine medicine = HardcodedData.medicineById(prescription.medicineId());
+            PharmacyBranch branch = PharmacyData.branchById(prescription.branchId());
+            Medicine medicine = PharmacyData.medicineById(prescription.medicineId());
             return new SearchRecord("PRESCRIPTION", prescription.id(), prescription.patientName(), (medicine == null ? "Unknown medicine" : medicine.name()) + " · " + prescription.doctorName(), prescription.status(), branch == null ? "Unknown branch" : branch.code());
         }
 
         private static SearchRecord inventory(Inventory inventory) {
-            PharmacyBranch branch = HardcodedData.branchById(inventory.branchId());
-            Medicine medicine = HardcodedData.medicineById(inventory.medicineId());
+            PharmacyBranch branch = PharmacyData.branchById(inventory.branchId());
+            Medicine medicine = PharmacyData.medicineById(inventory.medicineId());
             return new SearchRecord("INVENTORY", inventory.id(), medicine == null ? inventory.medicineId() : medicine.name(), inventory.quantity() + " units · reorder at " + inventory.reorderThreshold(), inventory.syncStatus(), branch == null ? "Unknown branch" : branch.code());
         }
 
         private static SearchRecord transaction(DispensingTransaction transaction) {
-            PharmacyBranch branch = HardcodedData.branchById(transaction.branchId());
+            PharmacyBranch branch = PharmacyData.branchById(transaction.branchId());
             return new SearchRecord("TRANSACTION", transaction.id(), transaction.idempotencyKey(), transaction.pharmacist() + " · " + transaction.quantity() + " units", transaction.syncStatus(), branch == null ? "Unknown branch" : branch.code());
         }
     }
@@ -648,6 +733,11 @@ public final class PharmacyWebServer {
 
         private static String number(String name, long value) {
             return value(name) + ":" + value;
+        }
+
+        private static String decimal(String name, double value) {
+            if (Double.isNaN(value) || Double.isInfinite(value)) return value(name) + ":0";
+            return value(name) + ":" + (Math.round(value * 100.0) / 100.0);
         }
 
         private static String bool(String name, boolean value) {

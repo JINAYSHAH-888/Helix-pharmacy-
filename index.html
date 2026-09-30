@@ -3,54 +3,109 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#f5f5f0" />
+  <meta name="theme-color" content="oklch(96.9% 0.0066 106.5)" />
+  <meta name="color-scheme" content="light" />
   <meta name="description" content="Helixis distributed pharmacy network control room." />
   <title>Helixis — Distributed Pharmacy Control Room</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
   <link rel="alternate" type="text/agent-view" href="index.agent" title="Helixis Agent View" />
+  <link rel="stylesheet" href="tokens/color-neutral.css" />
+  <link rel="stylesheet" href="tokens/color-good.css" />
+  <link rel="stylesheet" href="tokens/color-warn.css" />
+  <link rel="stylesheet" href="tokens/color-danger.css" />
+  <link rel="stylesheet" href="tokens/type.css" />
+  <link rel="stylesheet" href="tokens/semantic.css" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="glass/glass.css" />
+  <link rel="stylesheet" href="load-balancer.css" />
+  <script type="importmap">
+    { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    } }
+  </script>
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js" crossorigin />
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.15/dist/gsap.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.15/dist/ScrollTrigger.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.15/dist/ScrollSmoother.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.15/dist/CustomEase.min.js"></script>
 </head>
 <body class="opening-active" data-agent-view="helixis-pharmacy-control-room" data-agent-state="ready">
   <a class="agent-view-link" href="index.agent" rel="alternate agent-view" type="text/agent-view">Agent view of this page</a>
   <div class="grain" aria-hidden="true"></div>
 
+  <a class="skip-link" href="#overview">Skip to content</a>
+
+  <!-- One persistent WebGL canvas for every scene window (scroll-rig pattern). -->
+  <canvas id="scene-canvas" aria-hidden="true"></canvas>
+  <div id="scene-hud" aria-hidden="true"></div>
+
+  <!-- Static poster: shown in every scene window when WebGL is unavailable. -->
+  <svg class="poster-defs" aria-hidden="true" focusable="false">
+    <symbol id="cluster-poster" viewBox="0 0 400 300">
+      <g class="poster-links">
+        <path d="M200 238 L113 188 L113 88 L200 38 L287 88 L287 188 Z" />
+        <path d="M200 238 L200 38 M113 188 L287 88 M113 88 L287 188 M200 238 L113 88 M200 238 L287 88 M113 188 L200 38 M113 188 L287 188 M113 88 L287 88 M200 38 L287 188" class="poster-mesh" />
+      </g>
+      <g class="poster-nodes">
+        <rect x="186" y="224" width="28" height="28" /><rect x="99" y="174" width="28" height="28" /><rect x="99" y="74" width="28" height="28" />
+        <rect x="186" y="24" width="28" height="28" /><rect x="273" y="74" width="28" height="28" /><rect x="273" y="174" width="28" height="28" />
+      </g>
+      <g class="poster-text">
+        <text x="200" y="272" text-anchor="middle">N01 MUMBAI · ROUTER</text><text x="80" y="220" text-anchor="middle">N02 PUNE</text>
+        <text x="80" y="66" text-anchor="middle">N03 BENGALURU</text><text x="200" y="16" text-anchor="middle">N04 DELHI</text>
+        <text x="322" y="66" text-anchor="middle">N05 HYDERABAD</text><text x="322" y="220" text-anchor="middle">N06 CHENNAI</text>
+      </g>
+    </symbol>
+  </svg>
+
+  <header class="site-header" id="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#top" aria-label="Helixis home"><span class="brand-symbol" aria-hidden="true">+</span><span>HELIXIS</span><small>PHARMA / SYSTEMS</small></a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#network">Network</a>
+        <a href="#fault-tolerance">Fault lab</a>
+        <a href="#consistency">Consistency</a>
+        <a href="#integrity">Integrity</a>
+        <a href="#explorer">Data explorer</a>
+        <a href="#load-balancer">Load balancer</a>
+        <a href="#protocol">Protocol</a>
+      </nav>
+      <div class="header-actions">
+        <span class="gateway-state" role="status"><i id="gateway-dot" aria-hidden="true"></i><span id="gateway-label">Gateway checking</span></span>
+        <button class="refresh-button" id="refresh-button" type="button">Refresh <span aria-hidden="true">↻</span></button>
+      </div>
+    </div>
+  </header>
+
   <div id="smooth-wrapper">
     <div id="smooth-content">
-      <header class="site-header shell" id="site-header">
-        <a class="brand" href="#top" aria-label="Helixis home"><span class="brand-symbol">+</span><span>HELIXIS</span><small>PHARMA / SYSTEMS</small></a>
-        <nav class="main-nav" aria-label="Main navigation">
-          <a href="#network">Network</a>
-          <a href="#fault-tolerance">Fault lab</a>
-          <a href="#consistency">Consistency</a>
-          <a href="#explorer">Data explorer</a>
-          <a href="#protocol">Protocol</a>
-        </nav>
-        <div class="header-actions">
-          <span class="gateway-state"><i id="gateway-dot"></i><span id="gateway-label">Gateway checking</span></span>
-          <button class="refresh-button" id="refresh-button" type="button">Refresh <span aria-hidden="true">↻</span></button>
-        </div>
-      </header>
-
       <main id="top">
         <section class="tablet-scene" id="open" aria-labelledby="opening-title">
-          <div class="scene-head shell"><span class="mono">HELIXIS / DISTRIBUTED PHARMACY</span><span class="mono">ONE RECORD / SIX NODES</span></div>
-          <h1 class="sr-only" id="opening-title">Distributed pharmacy network</h1>
           <div class="tablet-stage">
-            <div class="tablet-shadow"></div>
-            <div class="capsule-frame-sequence" aria-label="Scroll-scrubbed capsule opening sequence" role="img" aria-roledescription="Helixis capsule opening animation, scrubbed by scroll">
-              <canvas id="capsule-canvas"></canvas>
+            <div class="hero-grid shell">
+              <div class="hero-copy">
+                <div class="spec-line mono"><span>HELIXIS / DISTRIBUTED PHARMACY</span><span>JAVA RMI · 6 REGISTRIES · :1099–1104</span></div>
+                <h1 id="opening-title">Six nodes.<br /><em>One record.</em></h1>
+                <p class="hero-lead">Every query enters the Mumbai router and fans out to six pharmacy registries. The cluster on the right is that network, running — scroll to fly into it.</p>
+                <dl class="hero-readout mono" data-hero-readout>
+                  <div><dt>SOURCE</dt><dd data-hr-mode>Connecting…</dd></div>
+                  <div><dt>NODES UP</dt><dd data-hr-alive>—</dd></div>
+                  <div><dt>GATEWAY RTT</dt><dd data-hr-rtt>—</dd></div>
+                  <div><dt>COORDINATOR</dt><dd data-hr-coord>—</dd></div>
+                </dl>
+                <a class="skip-opening mono" href="#overview">Skip the flight <span aria-hidden="true">↘</span></a>
+              </div>
+              <div class="scene-window" data-scene="hero" role="img" aria-label="Live model of the six-node cluster: Mumbai router sending queries to each registry and receiving replies. Labels show node ID, port and status.">
+                <svg class="scene-poster" aria-hidden="true"><use href="#cluster-poster" /></svg>
+                <i class="tick tick-tl"></i><i class="tick tick-tr"></i><i class="tick tick-bl"></i><i class="tick tick-br"></i>
+                <span class="window-tag mono">00 / ROUTER FAN-OUT · QUERY ⇄ REPLY</span>
+              </div>
             </div>
-            <div class="tablet tablet-top"><div class="tablet-edge"></div><span class="tablet-symbol">H</span><span class="tablet-copy mono">FORM / 01</span></div>
-            <div class="tablet-inside"><div class="inside-grid"></div><div class="inside-orbit"></div><div class="inside-rule"></div><p class="mono">DISTRIBUTED<br />HEALTH<br />INFRASTRUCTURE</p><span class="inside-mark">+</span><small class="mono">OPEN THE LAYER</small></div>
-            <div class="tablet tablet-bottom"><div class="tablet-edge"></div><span class="tablet-symbol">X</span><span class="tablet-copy mono">FORM / 02</span></div>
+            <div class="hero-progress mono" aria-hidden="true"><span>ORBIT</span><i><b></b></i><span>INSIDE THE CLUSTER</span></div>
           </div>
-          <div class="scene-foot mono"><span><i></i> KEEP SCROLLING</span><span>THE SYSTEM IS INSIDE</span></div>
-          <a class="skip-opening mono" href="#overview">Skip opening <span>↘</span></a>
         </section>
 
         <section class="system-overview shell reveal-section" id="overview">
@@ -82,6 +137,20 @@
               <div><p class="eyebrow"><span>THE ROUTE IS THE PRODUCT</span></p><h2>Six nodes.<br /><em>One answer.</em></h2></div>
               <div class="network-copy"><p>The control room keeps the branch registry and the live registry probes side by side. When the RMI cluster is running, the highest-priority reachable node is surfaced as coordinator.</p><a class="text-link" href="#explorer">Inspect the data <span>↘</span></a></div>
             </div>
+            <div class="scene-block scene-block-left">
+              <div class="scene-window scene-window-tall" data-scene="election" role="img" aria-label="Bully election across the six nodes. Scroll advances the rounds: each node sends ELECTION to every higher alive ID, receives OK, and the highest alive ID broadcasts COORDINATOR and is crowned.">
+                <svg class="scene-poster" aria-hidden="true"><use href="#cluster-poster" /></svg>
+                <i class="tick tick-tl"></i><i class="tick tick-tr"></i><i class="tick tick-bl"></i><i class="tick tick-br"></i>
+                <span class="window-tag mono">02 / BULLY ELECTION</span>
+              </div>
+              <aside class="scene-panel scene-panel-dark" aria-label="Election trace">
+                <div class="panel-head mono"><span>ELECTION ROUNDS</span><span data-scene-status="election">MODEL</span></div>
+                <ol class="scene-rail" data-scene-rail="election"></ol>
+                <p class="panel-rule">Priority is the node ID. A node that sees no coordinator sends <b>ELECTION</b> to every higher alive ID; each replies <b>OK</b> and takes over. The node with no higher alive peer broadcasts <b>COORDINATOR</b>. Same trace as <code>BullyElection.java</code>.</p>
+                <div class="panel-head mono"><span>MESSAGE LOG</span><span>LATEST FIRST</span></div>
+                <ol class="scene-log mono" data-scene-log aria-live="off"></ol>
+              </aside>
+            </div>
             <div class="network-summary" id="network-summary" aria-live="polite"><span class="summary-status"><i id="coordinator-dot"></i><span id="coordinator-label">Coordinator pending</span></span><span class="mono" id="network-mode">CATALOG-ONLY</span><span class="mono" id="reachable-label">0 / 6 REACHABLE</span></div>
             <div class="node-grid" id="node-grid" aria-live="polite"></div>
           </div>
@@ -93,6 +162,16 @@
             <div class="fault-intro">
               <div><p class="eyebrow"><span>MAKE THE FAILURE VISIBLE</span></p><h2 id="fault-title">A failure<br /><em>is part of the proof.</em></h2></div>
               <div class="fault-copy"><p>Run a controlled primary-backup exercise without touching pharmacy records. Append a test event, take Mumbai down, watch Pune promote itself, then recover Mumbai and replay the missing event.</p><p class="fault-disclaimer mono">SIMULATION STATE LIVES IN THE JAVA GATEWAY PROCESS · RESTART TO RESET</p></div>
+            </div>
+
+            <div class="scene-block scene-block-full">
+              <div class="scene-window" data-scene="fault" role="img" aria-label="Primary-backup failover. Mumbai is primary and replicates each write to Pune. Mumbai crashes and goes dark, writes reroute to Pune which is promoted in term 2, Mumbai rejoins and replays the events it missed.">
+                <svg class="scene-poster" aria-hidden="true"><use href="#cluster-poster" /></svg>
+                <i class="tick tick-tl"></i><i class="tick tick-tr"></i><i class="tick tick-bl"></i><i class="tick tick-br"></i>
+                <span class="window-tag mono">02A / FAILOVER · <span data-scene-status="fault">MODEL</span></span>
+              </div>
+              <ol class="scene-rail scene-rail-row" data-scene-rail="fault"></ol>
+              <p class="scene-note mono">Scroll drives the modelled sequence. Press a lab control below and the window switches to LIVE, mirroring the gateway's PrimaryBackupSimulation.</p>
             </div>
 
             <div class="fault-toolbar" aria-live="polite">
@@ -141,17 +220,36 @@
               <div class="fault-copy"><p>A live single-leader replication model. Write a record on the Mumbai leader and watch it fan out to five followers under a quorum you control, then read it back and see whether the quorum math guarantees the latest value — or lets a stale copy slip through.</p><p class="fault-disclaimer mono">CLIENT-SIDE MODEL · NO PHARMACY RECORDS ARE WRITTEN · RESET ANYTIME</p></div>
             </div>
 
+            <div class="scene-block scene-block-right">
+              <aside class="scene-panel" aria-label="Vector clock readout">
+                <div class="panel-head mono"><span>VECTOR CLOCKS · MED-0009</span><span data-scene-status="consistency">MODEL</span></div>
+                <ol class="scene-rail" data-scene-rail="consistency"></ol>
+                <dl class="vc-readout mono" data-vc-readout>
+                  <div><dt>DEL WRITE</dt><dd data-vc-del>—</dd></div>
+                  <div><dt>BLR WRITE</dt><dd data-vc-blr>—</dd></div>
+                  <div class="vc-wide"><dt>RELATION</dt><dd data-vc-rel>—</dd></div>
+                  <div class="vc-wide"><dt>ROW VERSION</dt><dd data-vc-ver>—</dd></div>
+                </dl>
+                <p class="panel-rule">Each column above a node is one entry of its clock <code>[MUM,PUN,BLR,DEL,HYD,CHN]</code>. Send: increment own entry. Receive: element-wise max, then increment. The real inventory rows for MED-0009 at BR-DEL-01 and BR-BLR-03 carry <code>{"BR-DEL-01": 6, "BR-BLR-03": 2}</code> and <code>CONFLICT</code>.</p>
+              </aside>
+              <div class="scene-window scene-window-tall" data-scene="consistency" role="img" aria-label="Six nodes with a stacked vector clock above each. Messages merge clocks. Delhi and Bengaluru write the same row concurrently, the clocks are incomparable, a conflict is flagged, and an optimistic version check commits one write and rejects the stale one.">
+                <svg class="scene-poster" aria-hidden="true"><use href="#cluster-poster" /></svg>
+                <i class="tick tick-tl"></i><i class="tick tick-tr"></i><i class="tick tick-bl"></i><i class="tick tick-br"></i>
+                <span class="window-tag mono">02B / VECTOR CLOCKS</span>
+              </div>
+            </div>
+
             <div class="repl-console">
               <div class="repl-config" aria-label="Replication configuration">
                 <div class="repl-config-row">
                   <span class="mono">CONSISTENCY MODEL</span>
-                  <div class="repl-seg" role="tablist" id="repl-mode" aria-label="Consistency model">
-                    <button class="repl-seg-btn is-active" data-mode="strong" type="button" role="tab" aria-selected="true">Strong · quorum</button>
-                    <button class="repl-seg-btn" data-mode="eventual" type="button" role="tab" aria-selected="false">Eventual</button>
+                  <div class="repl-seg" role="group" id="repl-mode" aria-label="Consistency model">
+                    <button class="repl-seg-btn is-active" data-mode="strong" type="button" aria-pressed="true">Strong · quorum</button>
+                    <button class="repl-seg-btn" data-mode="eventual" type="button" aria-pressed="false">Eventual</button>
                   </div>
                 </div>
-                <label class="repl-slider"><span class="mono">WRITE QUORUM · W = <b id="repl-w-val">2</b> / <span id="repl-n-val">6</span></span><input id="repl-w" type="range" min="1" max="6" value="2" /></label>
-                <label class="repl-slider"><span class="mono">READ QUORUM · R = <b id="repl-r-val">2</b> / <span id="repl-n-val-2">6</span></span><input id="repl-r" type="range" min="1" max="6" value="2" /></label>
+                <label class="repl-slider"><span class="mono">WRITE QUORUM · W = <b id="repl-w-val">2</b> / <span id="repl-n-val">6</span></span><input id="repl-w" type="range" min="1" max="6" value="2" aria-describedby="repl-verdict" /></label>
+                <label class="repl-slider"><span class="mono">READ QUORUM · R = <b id="repl-r-val">2</b> / <span id="repl-n-val-2">6</span></span><input id="repl-r" type="range" min="1" max="6" value="2" aria-describedby="repl-verdict" /></label>
                 <div class="repl-verdict" id="repl-verdict" aria-live="polite">—</div>
               </div>
 
@@ -205,6 +303,42 @@
           </div>
         </section>
 
+        <section class="integrity-section reveal-section" id="integrity" aria-labelledby="integrity-title">
+          <div class="shell">
+            <div class="section-rule section-rule-dark"><span>02C / INTEGRITY</span><span>SHA-256 PRESCRIPTION CHAIN · COMPUTED IN YOUR BROWSER</span></div>
+            <div class="fault-intro integrity-intro">
+              <div><p class="eyebrow eyebrow-dark"><span>TAMPER-EVIDENT BY CONSTRUCTION</span></p><h2 id="integrity-title">Change one record,<br /><em>break the chain.</em></h2></div>
+              <div class="fault-copy"><p>The twenty prescriptions served by the gateway are sealed into a hash chain: each block is <code>SHA-256(record ‖ previous block)</code>. Prescription 017 is then edited after sealing. Its digest no longer matches its seal, and every later link loses its proof.</p><p class="fault-disclaimer mono">CLIENT-SIDE CHAIN MODEL · SUBTLECRYPTO · NOTHING IS WRITTEN BACK</p></div>
+            </div>
+          </div>
+          <div class="scene-window scene-window-bleed" data-scene="integrity" role="img" aria-label="Twenty prescription blocks fly from the branch node that issued them into a two-row chain. A verification cursor recomputes each digest. Block 017 fails and is marked tampered; blocks 018 to 020 are marked unproven because their previous-hash pointer no longer matches.">
+            <svg class="scene-poster" aria-hidden="true"><use href="#cluster-poster" /></svg>
+            <i class="tick tick-tl"></i><i class="tick tick-tr"></i><i class="tick tick-bl"></i><i class="tick tick-br"></i>
+            <span class="window-tag mono">02C / HASH CHAIN</span>
+          </div>
+          <div class="shell">
+            <div class="integrity-console" data-integrity data-state="pending">
+              <ol class="scene-rail scene-rail-row" data-scene-rail="integrity"></ol>
+              <dl class="integrity-stats mono" aria-live="polite">
+                <div><dt>VERIFIED</dt><dd data-int-verified>—</dd></div>
+                <div><dt>CONTENT MISMATCH</dt><dd data-int-tampered class="int-danger">—</dd></div>
+                <div><dt>LINKS UNPROVEN</dt><dd data-int-unproven>—</dd></div>
+                <div><dt>RECOMPUTE TIME</dt><dd data-int-ms>—</dd></div>
+              </dl>
+              <div class="integrity-detail">
+                <p class="mono int-label">RX 017 · <span data-int-field>waiting for /api/prescriptions</span></p>
+                <p class="int-hash mono"><span>SEALED</span><code data-int-seal>—</code></p>
+                <p class="int-hash mono"><span>RECOMPUTED</span><code data-int-now>—</code></p>
+                <p class="mono int-summary" data-int-summary></p>
+              </div>
+              <div class="integrity-actions">
+                <button class="fault-button fault-button-primary" type="button" data-int-verify>Recompute all 20 digests <span aria-hidden="true">↻</span></button>
+                <button class="fault-button" type="button" data-int-toggle aria-pressed="false">Restore 017's original record</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="explorer-section reveal-section" id="explorer">
           <div class="shell">
             <div class="section-rule"><span>03 / DATA EXPLORER</span><span>LIVE READ MODEL</span></div>
@@ -225,17 +359,153 @@
             <div class="explorer-shell">
               <aside class="dataset-nav" aria-label="Database collections" role="tablist">
                 <p class="mono">COLLECTIONS</p>
-                <button class="dataset-tab is-active" type="button" role="tab" aria-selected="true" data-dataset="medicines"><span>01</span> Medicines <b>15</b></button>
-                <button class="dataset-tab" type="button" role="tab" aria-selected="false" data-dataset="prescriptions"><span>02</span> Prescriptions <b>20</b></button>
-                <button class="dataset-tab" type="button" role="tab" aria-selected="false" data-dataset="inventory"><span>03</span> Inventory <b>24</b></button>
-                <button class="dataset-tab" type="button" role="tab" aria-selected="false" data-dataset="transactions"><span>04</span> Dispensing ledger <b>12</b></button>
-                <button class="dataset-tab" type="button" role="tab" aria-selected="false" data-dataset="branches"><span>05</span> Branch registry <b>06</b></button>
+                <button class="dataset-tab is-active" type="button" role="tab" id="tab-medicines" aria-controls="table-panel" aria-selected="true" tabindex="0" data-dataset="medicines"><span>01</span> Medicines <b>—</b></button>
+                <button class="dataset-tab" type="button" role="tab" id="tab-prescriptions" aria-controls="table-panel" aria-selected="false" tabindex="-1" data-dataset="prescriptions"><span>02</span> Prescriptions <b>—</b></button>
+                <button class="dataset-tab" type="button" role="tab" id="tab-inventory" aria-controls="table-panel" aria-selected="false" tabindex="-1" data-dataset="inventory"><span>03</span> Inventory <b>—</b></button>
+                <button class="dataset-tab" type="button" role="tab" id="tab-transactions" aria-controls="table-panel" aria-selected="false" tabindex="-1" data-dataset="transactions"><span>04</span> Dispensing ledger <b>—</b></button>
+                <button class="dataset-tab" type="button" role="tab" id="tab-branches" aria-controls="table-panel" aria-selected="false" tabindex="-1" data-dataset="branches"><span>05</span> Branch registry <b>—</b></button>
                 <div class="dataset-note"><span class="status-dot status-dot-dark"></span><span>Reference schema<br />preserved in SQL</span></div>
               </aside>
-              <div class="table-panel">
-                <div class="table-toolbar"><div><span class="mono" id="table-kicker">MEDICINES</span><strong id="table-summary">Waiting for gateway…</strong></div><span class="mono" id="table-state">READ ONLY</span></div>
+              <div class="table-panel" id="table-panel" role="tabpanel" aria-labelledby="tab-medicines">
+                <div class="table-toolbar"><div><span class="mono" id="table-kicker">MEDICINES</span><strong id="table-summary">Waiting for gateway…</strong></div><div class="table-actions"><span class="mono" id="table-state">LIVE · EDITABLE</span><button class="route-button" id="add-entry" type="button">Add entry <span aria-hidden="true">+</span></button></div></div>
                 <div class="table-responsive"><table class="data-table"><thead id="data-head"></thead><tbody id="data-body"><tr><td class="table-empty" colspan="6">Connect the Java gateway to inspect records.</td></tr></tbody></table></div>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="lb-section reveal-section" id="load-balancer" aria-labelledby="lb-title">
+          <div class="shell">
+            <div class="section-rule"><span>03A / LOAD BALANCING LAB</span><span id="lb-transport-note">SEVEN ALGORITHMS · LIVE DISPATCH</span></div>
+            <div class="lb-intro">
+              <div><p class="eyebrow"><span>ONE DECISION, SIX HUNDRED TIMES</span></p><h2 id="lb-title">Which node<br /><em>takes this one?</em></h2></div>
+              <div class="lb-intro-copy">
+                <p>A load balancer answers one question, over and over: of the backends that are healthy right now, which should serve the request in my hand? Seven algorithms answer it differently, and the difference only shows under load.</p>
+                <p>Every request here is really executed. When a branch node is listening on its RMI port the call goes over RMI; otherwise the gateway runs the same read against PostgreSQL itself and labels it <span class="mono">LOCAL</span>. Latency, queue depth and failures are measured, never invented.</p>
+              </div>
+            </div>
+
+            <dl class="lb-headline" aria-label="Last run">
+              <div><dt class="mono">ALGORITHM</dt><dd data-metric="strategyLabel">—</dd></div>
+              <div><dt class="mono">THROUGHPUT</dt><dd><span data-metric="throughput">—</span> <small>req/s</small></dd></div>
+              <div><dt class="mono">P95 LATENCY</dt><dd><span data-metric="p95Ms">—</span> <small>ms</small></dd></div>
+              <div><dt class="mono">FAIRNESS</dt><dd data-metric="fairness">—</dd></div>
+              <div><dt class="mono">ERRORS</dt><dd data-metric="errors">—</dd></div>
+            </dl>
+
+            <div class="lb-block-head"><span class="mono">A / THE ALGORITHMS</span><span class="mono">PICK ONE, THEN DISPATCH</span></div>
+            <div class="algo-grid" id="algo-grid" role="radiogroup" aria-label="Load balancing algorithm"></div>
+
+            <div class="lb-block-head"><span class="mono">B / DISPATCH CONSOLE</span><span class="mono">SHAPE THE WORKLOAD, THEN RUN IT</span></div>
+            <p class="lb-block-note">Concurrency is what makes a balancer's choice matter: with one request in flight at a time every algorithm looks identical. Raise it and the queue-aware rules start to separate from the blind ones.</p>
+            <div class="console-panel">
+              <div class="console-controls">
+                <label class="console-field">
+                  <span class="mono">REQUESTS <b id="requests-value">120</b></span>
+                  <input type="range" id="requests-input" min="10" max="600" step="10" value="120" />
+                  <small>How many requests the burst contains.</small>
+                </label>
+                <label class="console-field">
+                  <span class="mono">CONCURRENCY <b id="concurrency-value">8</b></span>
+                  <input type="range" id="concurrency-input" min="1" max="32" step="1" value="8" />
+                  <small>How many are in flight at once.</small>
+                </label>
+                <label class="console-field">
+                  <span class="mono">KEY MIX</span>
+                  <select id="skew-input">
+                    <option value="UNIFORM">Uniform — every key equally likely</option>
+                    <option value="SEQUENTIAL">Sequential — each key in turn</option>
+                    <option value="HOT_KEY">Hot key — 80% ask for one key</option>
+                  </select>
+                  <small>Only consistent hashing routes on the key.</small>
+                </label>
+              </div>
+              <div class="console-actions">
+                <button class="fault-button fault-button-primary" id="run-burst" type="button">Dispatch burst <span aria-hidden="true">↗</span></button>
+                <button class="fault-button" id="run-compare" type="button">Compare all seven</button>
+                <button class="fault-button fault-button-quiet" id="run-reset" type="button">Reset lab</button>
+              </div>
+              <p class="console-status mono" id="console-status" aria-live="polite">Connect the Java gateway to start the lab.</p>
+            </div>
+
+            <div class="lb-block-head"><span class="mono">C / THE BACKEND POOL</span><span class="mono">SIX BRANCH NODES · LIVE HEALTH</span></div>
+            <p class="lb-block-note">Crash a node and dispatch a burst: it keeps taking requests until three of them fail, its breaker opens, and the rest of the burst goes to the other five. Six seconds later the breaker goes half-open and one probe decides whether it rejoins.</p>
+            <figure class="flow-figure">
+              <svg id="flow-svg" viewBox="0 0 900 360" role="img" aria-labelledby="flow-title flow-desc">
+                <title id="flow-title">Request flow from the balancer to the six backend nodes</title>
+                <desc id="flow-desc">Each line's thickness is the share of the last burst that the algorithm sent to that node.</desc>
+              </svg>
+              <figcaption class="mono">LINE WEIGHT = SHARE OF THE LAST BURST · DASHED = OUT OF THE POOL</figcaption>
+            </figure>
+            <div class="pool-grid" id="pool-grid"></div>
+
+            <div class="lb-block-head"><span class="mono">D / WHAT THE RUN MEASURED</span><span class="mono">DISTRIBUTION · LATENCY · FAIRNESS</span></div>
+            <p class="lb-block-note">Perfect fairness and good latency are different goals, and some algorithms trade one away for the other on purpose. Least response time will happily send most of a burst to the quickest node — that is the bet, not a bug.</p>
+            <div class="result-grid">
+              <article class="result-card">
+                <div class="card-head"><span class="mono">DISTRIBUTION</span><span class="mono" id="dist-label">—</span></div>
+                <div class="dist-bars" id="dist-bars"><p class="lb-empty">Dispatch a burst to see where the requests went.</p></div>
+                <dl class="dist-stats">
+                  <div><dt class="mono">JAIN FAIRNESS</dt><dd data-metric="fairness">—</dd></div>
+                  <div><dt class="mono">BUSIEST − QUIETEST</dt><dd><span data-metric="spreadPercent">—</span> <small>pp</small></dd></div>
+                </dl>
+                <p class="card-note">Jain's index is <span class="mono">(Σx)² / (n·Σx²)</span> over the per-node counts. It reads 1.00 for a perfectly even split and falls towards 1/n as one node takes everything.</p>
+              </article>
+              <article class="result-card">
+                <div class="card-head"><span class="mono">LATENCY</span><span class="mono" id="latency-label">—</span></div>
+                <div class="latency-rail" id="latency-rail"><p class="lb-empty">No measurements yet.</p></div>
+                <dl class="dist-stats">
+                  <div><dt class="mono">MEAN</dt><dd><span data-metric="meanMs">—</span> <small>ms</small></dd></div>
+                  <div><dt class="mono">DURATION</dt><dd><span data-metric="durationMs">—</span> <small>ms</small></dd></div>
+                </dl>
+                <p class="card-note">Percentiles come from the measured service time of every request in the burst, taken with a nanosecond clock and reported in milliseconds.</p>
+              </article>
+            </div>
+
+            <div class="compare-panel">
+              <div class="card-head"><span class="mono">ALGORITHM COMPARISON</span><span class="mono" id="compare-label">RUN “COMPARE ALL SEVEN” TO FILL THIS</span></div>
+              <div class="table-responsive">
+                <table class="data-table compare-table">
+                  <thead><tr><th scope="col">Algorithm</th><th scope="col">Fairness</th><th scope="col">Spread</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">p99</th><th scope="col">Throughput</th><th scope="col">Errors</th></tr></thead>
+                  <tbody id="compare-body"><tr><td class="table-empty" colspan="8">The same workload, put through all seven algorithms in turn.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="lb-block-head"><span class="mono">E / DECISION TRACE</span><span class="mono">LATEST FIRST · LAST 80 DISPATCHES</span></div>
+            <p class="lb-block-note">The balancer records the arithmetic behind each pick as it makes it — the cursor position, the running weight total, the queue depth it compared, the ring slot the key hashed into. This is the log, not a reconstruction.</p>
+            <div class="trace-panel">
+              <div class="table-responsive">
+                <table class="data-table trace-table">
+                  <thead><tr><th scope="col">#</th><th scope="col">Key</th><th scope="col">Chose</th><th scope="col">Because</th><th scope="col">Transport</th><th scope="col">Latency</th><th scope="col">Status</th></tr></thead>
+                  <tbody id="trace-body"><tr><td class="table-empty" colspan="7">Dispatch a burst to fill the trace.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="lb-block-head"><span class="mono">F / HOW THE BALANCER WORKS</span><span class="mono">HEALTH · BREAKER · DISPATCH</span></div>
+            <ol class="mechanics-list">
+              <li><span class="mono">01 / PROBE</span><div><h3>Health check before every burst</h3><p>Each backend's RMI registry port gets a TCP connect with a 250 ms timeout. Answering means the request will travel over RMI; not answering means the gateway serves it locally and says so in the trace.</p></div></li>
+              <li><span class="mono">02 / SELECT</span><div><h3>The algorithm picks from the healthy set</h3><p>Only backends whose circuit breaker is closed are offered. The chosen rule applies to that set, and the reason it produces is carried through to the trace.</p></div></li>
+              <li><span class="mono">03 / DISPATCH</span><div><h3>The request is really executed</h3><p>Over RMI when the node is listening, otherwise against PostgreSQL here — including the SHA-256 integrity pass each node runs over its own branch's prescriptions. Service time is measured around that work.</p></div></li>
+              <li><span class="mono">04 / ACCOUNT</span><div><h3>Every result updates the pool</h3><p>Success clears the failure streak and updates the node's exponentially weighted mean latency, <span class="mono">ewma = 0.8·ewma + 0.2·sample</span>. Failure increments the streak and drops the cached RMI stub.</p></div></li>
+              <li><span class="mono">05 / BREAK</span><div><h3>Three failures open the circuit</h3><p>A crashed node keeps being offered work until three failures are actually observed — that detection gap is real, and hiding it would make the breaker decorative. The open breaker then removes it for six seconds before a half-open probe decides.</p></div></li>
+            </ol>
+            <div class="state-legend">
+              <span class="mono">HEALTH STATES</span>
+              <div><i class="legend-dot legend-dot-good"></i><b>HEALTHY_RMI</b> answering on its registry port; requests travel over RMI</div>
+              <div><i class="legend-dot legend-dot-good"></i><b>HEALTHY_LOCAL</b> in the pool, but the node process is not up, so the gateway serves it</div>
+              <div><i class="legend-dot legend-dot-warn"></i><b>FAILING</b> crashed, but still in the pool — not enough failures observed yet</div>
+              <div><i class="legend-dot legend-dot-warn"></i><b>PROBING</b> breaker half-open; one request decides whether it rejoins</div>
+              <div><i class="legend-dot legend-dot-bad"></i><b>CIRCUIT_OPEN</b> three consecutive failures; out of the pool for six seconds</div>
+            </div>
+
+            <div class="lb-block-head"><span class="mono">G / RUN HISTORY</span><span class="mono">LAST EIGHT BURSTS</span></div>
+            <div class="table-responsive">
+              <table class="data-table history-table">
+                <thead><tr><th scope="col">Run</th><th scope="col">Algorithm</th><th scope="col">Workload</th><th scope="col">Duration</th><th scope="col">Throughput</th><th scope="col">p95</th><th scope="col">Fairness</th></tr></thead>
+                <tbody id="history-body"><tr><td class="table-empty" colspan="7">No runs yet in this gateway process.</td></tr></tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -258,7 +528,7 @@
         <section class="database-section reveal-section" id="database">
           <div class="shell">
             <div class="section-rule"><span>05 / DATABASE MAP</span><span>REFERENCE SCHEMA / LIVE MODEL</span></div>
-            <div class="database-intro"><div><p class="eyebrow"><span>THE TABLES BEHIND THE NODES</span></p><h2>Made to<br /><em>remember.</em></h2></div><p>The supplied runtime currently uses `HardcodedData` as its source of truth. The PostgreSQL schema remains preserved as a migration-ready reference for a future persistent adapter.</p></div>
+            <div class="database-intro"><div><p class="eyebrow"><span>THE TABLES BEHIND THE NODES</span></p><h2>Made to<br /><em>remember.</em></h2></div><p>Every node and the gateway read these five tables from PostgreSQL (<code>helixis_pharmacy</code>) over JDBC. Change a row with SQL and the control room shows it within about two seconds.</p></div>
             <div class="schema-list" id="schema-list"><div class="schema-empty">Loading schema map…</div></div>
           </div>
         </section>
@@ -271,11 +541,26 @@
     </div>
   </div>
 
-  <dialog class="record-dialog" id="record-dialog" aria-labelledby="dialog-title">
-    <button class="dialog-close" id="dialog-close" type="button" aria-label="Close record details">×</button>
+  <dialog class="record-dialog" id="record-dialog" aria-labelledby="dialog-title" closedby="any">
+    <form method="dialog" class="dialog-close-form"><button class="dialog-close" id="dialog-close" aria-label="Close record details">×</button></form>
     <div id="dialog-content"></div>
+    <div class="dialog-actions"><button class="route-button" id="edit-entry" type="button">Edit entry <span aria-hidden="true">✎</span></button></div>
+  </dialog>
+
+  <dialog class="record-dialog entry-dialog" id="entry-dialog" aria-labelledby="entry-title">
+    <form method="dialog" class="dialog-close-form"><button class="dialog-close" aria-label="Close without saving">×</button></form>
+    <form id="entry-form" novalidate>
+      <p class="dialog-eyebrow" id="entry-eyebrow">NEW ENTRY</p>
+      <h2 id="entry-title">Add entry</h2>
+      <div class="entry-fields" id="entry-fields"></div>
+      <p class="entry-feedback" id="entry-feedback" role="status" aria-live="polite"></p>
+      <div class="dialog-actions"><button class="route-button" id="entry-save" type="submit">Save to database <span aria-hidden="true">↗</span></button></div>
+    </form>
   </dialog>
 
   <script src="script.js"></script>
+  <script src="load-balancer.js"></script>
+  <script type="module" src="scene/main.js"></script>
+  <script type="module" src="glass/console-init.js"></script>
 </body>
 </html>

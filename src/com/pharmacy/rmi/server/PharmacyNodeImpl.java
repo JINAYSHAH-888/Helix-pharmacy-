@@ -9,13 +9,14 @@ import java.util.*;
 
 public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNode {
     private final String serverName;
-    private final Set<String> ownedBranchIds;
+    /** Branch codes this node serves (e.g. BR-MUM-02); their UUIDs come from PostgreSQL. */
+    private final Set<String> ownedBranchCodes;
     private final LamportClock clock = new LamportClock();
 
-    public PharmacyNodeImpl(String serverName, Set<String> ownedBranchIds) throws RemoteException {
+    public PharmacyNodeImpl(String serverName, Set<String> ownedBranchCodes) throws RemoteException {
         super();
         this.serverName = serverName;
-        this.ownedBranchIds = Set.copyOf(ownedBranchIds);
+        this.ownedBranchCodes = Set.copyOf(ownedBranchCodes);
     }
 
     public String getServerName() { return serverName; }
@@ -29,7 +30,7 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
         String q = request.getQuery().trim().toLowerCase(Locale.ROOT);
         List<String> out = new ArrayList<>();
 
-        for (Medicine m : HardcodedData.MEDICINES) {
+        for (Medicine m : PharmacyData.medicines()) {
             if ((request.getType()==SearchType.MEDICINE || request.getType()==SearchType.ANY)
                     && locallyRelevantMedicine(m.id())
                     && (m.code().toLowerCase(Locale.ROOT).contains(q)
@@ -39,8 +40,8 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             }
         }
 
-        for (Prescription p : HardcodedData.PRESCRIPTIONS) {
-            if (!ownedBranchIds.contains(p.branchId())) continue;
+        for (Prescription p : PharmacyData.prescriptions()) {
+            if (!ownedBranchIds().contains(p.branchId())) continue;
             boolean direct = p.id().toLowerCase(Locale.ROOT).contains(q)
                     || p.hash().toLowerCase(Locale.ROOT).contains(q)
                     || p.patientId().toLowerCase(Locale.ROOT).contains(q)
@@ -58,8 +59,8 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
                 out.add(formatPrescription(p));
         }
 
-        for (Inventory i : HardcodedData.INVENTORY) {
-            if (!ownedBranchIds.contains(i.branchId())) continue;
+        for (Inventory i : PharmacyData.inventory()) {
+            if (!ownedBranchIds().contains(i.branchId())) continue;
             boolean medMatch = relatedMedicine(i.medicineId(), q);
             boolean match = switch (request.getType()) {
                 case INVENTORY -> i.id().toLowerCase(Locale.ROOT).contains(q) || medMatch;
@@ -70,8 +71,8 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             if (match) out.add(formatInventory(i));
         }
 
-        for (DispensingTransaction t : HardcodedData.TRANSACTIONS) {
-            if (!ownedBranchIds.contains(t.branchId())) continue;
+        for (DispensingTransaction t : PharmacyData.transactions()) {
+            if (!ownedBranchIds().contains(t.branchId())) continue;
             boolean txMatch = t.id().toLowerCase(Locale.ROOT).contains(q)
                     || t.idempotencyKey().toLowerCase(Locale.ROOT).contains(q);
             boolean rxMatch = t.prescriptionId().toLowerCase(Locale.ROOT).contains(q);
@@ -90,11 +91,11 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
     }
 
     private boolean locallyRelevantMedicine(String medicineId) {
-        return HardcodedData.INVENTORY.stream().anyMatch(i -> ownedBranchIds.contains(i.branchId()) && i.medicineId().equals(medicineId))
-            || HardcodedData.PRESCRIPTIONS.stream().anyMatch(p -> ownedBranchIds.contains(p.branchId()) && p.medicineId().equals(medicineId));
+        return PharmacyData.inventory().stream().anyMatch(i -> ownedBranchIds().contains(i.branchId()) && i.medicineId().equals(medicineId))
+            || PharmacyData.prescriptions().stream().anyMatch(p -> ownedBranchIds().contains(p.branchId()) && p.medicineId().equals(medicineId));
     }
     private boolean relatedMedicine(String medicineId, String q) {
-        Medicine m=HardcodedData.medicineById(medicineId);
+        Medicine m=PharmacyData.medicineById(medicineId);
         return m!=null && (m.id().equalsIgnoreCase(q) || m.code().equalsIgnoreCase(q)
                 || m.name().toLowerCase(Locale.ROOT).contains(q)
                 || m.genericName().toLowerCase(Locale.ROOT).contains(q));
@@ -109,8 +110,8 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             m.controlled(), m.scheduleClass(), m.unit(), m.manufacturer());
     }
     private String formatPrescription(Prescription p) {
-        Medicine m=HardcodedData.medicineById(p.medicineId());
-        PharmacyBranch b=HardcodedData.branchById(p.branchId());
+        Medicine m=PharmacyData.medicineById(p.medicineId());
+        PharmacyBranch b=PharmacyData.branchById(p.branchId());
         return String.format(
             "[PRESCRIPTION] %s  -  Status: %s%n" +
             "             Patient: %s (%s)%n" +
@@ -125,8 +126,8 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             (b==null?p.branchId():b.code()+" / "+b.city()), p.hash());
     }
     private String formatInventory(Inventory i) {
-        PharmacyBranch b=HardcodedData.branchById(i.branchId());
-        Medicine m=HardcodedData.medicineById(i.medicineId());
+        PharmacyBranch b=PharmacyData.branchById(i.branchId());
+        Medicine m=PharmacyData.medicineById(i.medicineId());
         return String.format(
             "[INVENTORY]  %s%n" +
             "             Medicine : %s%n" +
@@ -137,7 +138,7 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             i.quantity(), i.reorderThreshold(), i.vectorClock(), i.syncStatus());
     }
     private String formatTransaction(DispensingTransaction t) {
-        PharmacyBranch b=HardcodedData.branchById(t.branchId());
+        PharmacyBranch b=PharmacyData.branchById(t.branchId());
         return String.format(
             "[DISPENSING] %s%n" +
             "             Prescription: %-25s Branch: %s%n" +
@@ -146,5 +147,12 @@ public class PharmacyNodeImpl extends UnicastRemoteObject implements PharmacyNod
             "             Dispensed At: %-25s Sync:   %s",
             t.id(), t.prescriptionId(), (b==null?t.branchId():b.code()+" / "+b.city()),
             t.pharmacist(), t.quantity(), t.idempotencyKey(), t.dispensedAt(), t.syncStatus());
+    }
+
+    /** Resolved per query, so a change to pharmacy_branches in SQL is picked up live. */
+    private java.util.Set<String> ownedBranchIds() {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (var b : PharmacyData.branches()) if (ownedBranchCodes.contains(b.code())) ids.add(b.id());
+        return ids;
     }
 }
